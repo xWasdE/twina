@@ -45,6 +45,10 @@ window.toggleTheme = () => {
 function initTheme() {
     const savedTheme = localStorage.getItem('theme') || 'dark';
     document.documentElement.setAttribute('data-theme', savedTheme);
+    
+    document.getElementById('theme-toggle-login')?.addEventListener('click', window.toggleTheme);
+    document.getElementById('theme-toggle-app')?.addEventListener('click', window.toggleTheme);
+    document.getElementById('qr-theme-toggle')?.addEventListener('click', window.toggleTheme);
 }
 initTheme();
 
@@ -657,6 +661,8 @@ function listenCategories() {
         const catSelect = document.getElementById('new-product-category');
         const editCatSelect = document.getElementById('edit-cat-select');
         
+        let selectedCatId = editCatSelect ? editCatSelect.value : '';
+        
         if(catOrder) catOrder.innerHTML = ''; 
         if(catSelect) catSelect.innerHTML = '';
         if(editCatSelect) editCatSelect.innerHTML = '<option value="">Kategori Seçin</option>';
@@ -688,14 +694,18 @@ function listenCategories() {
             }
         });
         
+        if(editCatSelect && selectedCatId) {
+            editCatSelect.value = selectedCatId;
+        }
+        
         if(!validCurrentCat && globalCategoriesList.length > 0) {
             currentCategory = globalCategoriesList[0].name;
         }
         
         listenProducts();
         
-        if(isQRMode && typeof renderQR === 'function') {
-            renderQR();
+        if(isQRMode && typeof window.renderQR === 'function') {
+            window.renderQR();
         }
     });
     globalUnsubscribes.push(unsub);
@@ -729,9 +739,13 @@ document.getElementById('update-cat-btn').addEventListener('click', async () => 
     const newName = document.getElementById('edit-cat-name').value.trim().toUpperCase();
     const newOrder = parseInt(document.getElementById('edit-cat-order').value) || 99;
     
-    if(!catId || !newName) return;
+    if(!catId || !newName) {
+        showModal('HATA', 'Lütfen güncellenecek kategoriyi seçin ve yeni ismi girin.', '', null, true);
+        return;
+    }
     
     const cat = globalCategoriesList.find(c => c.id === catId);
+    if(!cat) return;
     const oldName = cat.name;
     
     await updateDoc(doc(db, "categories", catId), { name: newName, order: newOrder });
@@ -739,18 +753,30 @@ document.getElementById('update-cat-btn').addEventListener('click', async () => 
     if(oldName !== newName) {
         const q = query(collection(db, "products"), where("cat", "==", oldName));
         const snap = await getDocs(q);
-        snap.forEach(async (d) => {
-            await updateDoc(doc(db, "products", d.id), { cat: newName });
+        const updatePromises = [];
+        snap.forEach((d) => {
+            updatePromises.push(updateDoc(doc(db, "products", d.id), { cat: newName }));
         });
+        await Promise.all(updatePromises);
     }
+    
+    document.getElementById('edit-cat-select').value = '';
+    document.getElementById('edit-cat-name').value = '';
+    document.getElementById('edit-cat-order').value = '';
     showModal('BAŞARILI', 'Kategori güncellendi.', '', null, true);
 });
 
 document.getElementById('delete-cat-btn').addEventListener('click', () => {
     const catId = document.getElementById('edit-cat-select').value;
-    if(!catId) return;
+    if(!catId) {
+        showModal('HATA', 'Lütfen silinecek kategoriyi seçin.', '', null, true);
+        return;
+    }
     showModal('KATEGORİ SİL', 'Bu kategoriyi silerseniz içindeki ürünler MENÜDE GÖRÜNMEZ. Emin misiniz?', '', async () => {
         await deleteDoc(doc(db, "categories", catId));
+        document.getElementById('edit-cat-select').value = '';
+        document.getElementById('edit-cat-name').value = '';
+        document.getElementById('edit-cat-order').value = '';
         showModal('BAŞARILI', 'Kategori silindi.', '', null, true);
     });
 });
@@ -863,9 +889,9 @@ document.getElementById('cancel-edit-btn').addEventListener('click', () => {
     document.getElementById('save-product-btn').textContent = "ÜRÜNÜ KAYDET";
     document.getElementById('save-product-btn').className = "btn-accent";
     document.getElementById('cancel-edit-btn').style.display = 'none';
-    document.querySelectorAll('.add-form input').forEach(i => {
+    document.querySelectorAll('#product-form input').forEach(i => {
         if(i.type === 'checkbox') i.checked = false;
-        else if(i.id === 'new-product-order' || i.id === 'cat-order') i.value = '99';
+        else if(i.id === 'new-product-order') i.value = '99';
         else i.value = '';
     });
 });
