@@ -19,6 +19,7 @@ let currentOrderDocId = null;
 let currentCategory = '';
 let companyInfo = { name: "TWIN-A", phone: "", address: "", open: "", close: "", broadcast: "", maintenance: false };
 let editingProductId = null;
+let editingProductStock = true;
 let isMaintenanceEnforced = false;
 let globalUnsubscribes = [];
 let timeUpdaterInterval = null;
@@ -26,6 +27,7 @@ let timeUpdaterInterval = null;
 let globalOrders = [];
 let globalExpenses = [];
 let chartInstances = {};
+let globalCategoriesList = [];
 
 const urlParams = new URLSearchParams(window.location.search);
 const isQRMode = urlParams.get('qr') === '1';
@@ -646,40 +648,108 @@ document.getElementById('back-to-tables').addEventListener('click', () => {
 
 function listenCategories() {
     const unsub = onSnapshot(collection(db, "categories"), (snapshot) => {
+        globalCategoriesList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        globalCategoriesList.sort((a,b) => (a.order || 99) - (b.order || 99));
+        
         const catOrder = document.getElementById('categories-container');
         const catSelect = document.getElementById('new-product-category');
+        const editCatSelect = document.getElementById('edit-cat-select');
+        
         if(catOrder) catOrder.innerHTML = ''; 
         if(catSelect) catSelect.innerHTML = '';
+        if(editCatSelect) editCatSelect.innerHTML = '<option value="">Kategori Seçin</option>';
         
-        snapshot.docs.forEach((docSnap, index) => {
-            const data = docSnap.data();
-            if(index === 0 && !currentCategory) currentCategory = data.name;
+        let validCurrentCat = false;
+        
+        globalCategoriesList.forEach((cat, index) => {
+            if(cat.name === currentCategory) validCurrentCat = true;
+            if(index === 0 && (!currentCategory || !validCurrentCat)) currentCategory = cat.name;
             
             if(catOrder) {
                 const btn = document.createElement('button');
-                btn.className = `cat-btn ${currentCategory === data.name ? 'active' : ''}`;
-                btn.textContent = data.name;
-                btn.onclick = () => { currentCategory = data.name; listenCategories(); listenProducts(); };
+                btn.className = `cat-btn ${currentCategory === cat.name ? 'active' : ''}`;
+                btn.textContent = cat.name;
+                btn.onclick = () => { currentCategory = cat.name; listenCategories(); listenProducts(); };
                 catOrder.appendChild(btn);
             }
 
             if(catSelect) {
                 const opt = document.createElement('option');
-                opt.value = data.name; opt.textContent = data.name;
+                opt.value = cat.name; opt.textContent = cat.name;
                 catSelect.appendChild(opt);
             }
+            
+            if(editCatSelect) {
+                const opt = document.createElement('option');
+                opt.value = cat.id; opt.textContent = cat.name;
+                editCatSelect.appendChild(opt);
+            }
         });
+        
+        if(!validCurrentCat && globalCategoriesList.length > 0) {
+            currentCategory = globalCategoriesList[0].name;
+        }
+        
         listenProducts();
+        
+        if(isQRMode && typeof renderQR === 'function') {
+            renderQR();
+        }
     });
     globalUnsubscribes.push(unsub);
 }
 
-document.getElementById('add-category-btn').addEventListener('click', () => {
-    showModal('KATEGORİ EKLE', 'YENİ KATEGORİ İSMİNİ GİRİNİZ:', '<input type="text" id="cat-name" placeholder="Örn: SICAK KAHVELER">', async (data) => {
-        if(data['cat-name']) {
-            await addDoc(collection(db, "categories"), { name: data['cat-name'].toUpperCase() });
-            showModal('BAŞARILI', 'Kategori eklendi.', '', null, true);
-        }
+document.getElementById('add-category-btn').addEventListener('click', async () => {
+    const name = document.getElementById('cat-name').value.trim().toUpperCase();
+    const order = parseInt(document.getElementById('cat-order').value) || 99;
+    if(name) {
+        await addDoc(collection(db, "categories"), { name: name, order: order });
+        document.getElementById('cat-name').value = '';
+        document.getElementById('cat-order').value = '99';
+        showModal('BAŞARILI', 'Kategori eklendi.', '', null, true);
+    }
+});
+
+document.getElementById('edit-cat-select').addEventListener('change', (e) => {
+    const catId = e.target.value;
+    const cat = globalCategoriesList.find(c => c.id === catId);
+    if(cat) {
+        document.getElementById('edit-cat-name').value = cat.name;
+        document.getElementById('edit-cat-order').value = cat.order || 99;
+    } else {
+        document.getElementById('edit-cat-name').value = '';
+        document.getElementById('edit-cat-order').value = '';
+    }
+});
+
+document.getElementById('update-cat-btn').addEventListener('click', async () => {
+    const catId = document.getElementById('edit-cat-select').value;
+    const newName = document.getElementById('edit-cat-name').value.trim().toUpperCase();
+    const newOrder = parseInt(document.getElementById('edit-cat-order').value) || 99;
+    
+    if(!catId || !newName) return;
+    
+    const cat = globalCategoriesList.find(c => c.id === catId);
+    const oldName = cat.name;
+    
+    await updateDoc(doc(db, "categories", catId), { name: newName, order: newOrder });
+    
+    if(oldName !== newName) {
+        const q = query(collection(db, "products"), where("cat", "==", oldName));
+        const snap = await getDocs(q);
+        snap.forEach(async (d) => {
+            await updateDoc(doc(db, "products", d.id), { cat: newName });
+        });
+    }
+    showModal('BAŞARILI', 'Kategori güncellendi.', '', null, true);
+});
+
+document.getElementById('delete-cat-btn').addEventListener('click', () => {
+    const catId = document.getElementById('edit-cat-select').value;
+    if(!catId) return;
+    showModal('KATEGORİ SİL', 'Bu kategoriyi silerseniz içindeki ürünler MENÜDE GÖRÜNMEZ. Emin misiniz?', '', async () => {
+        await deleteDoc(doc(db, "categories", catId));
+        showModal('BAŞARILI', 'Kategori silindi.', '', null, true);
     });
 });
 
@@ -690,14 +760,13 @@ function listenProducts() {
         if(container) container.innerHTML = '';
         if(adminContainer) adminContainer.innerHTML = '';
 
-        const productsByCategory = {};
+        let allProducts = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+        allProducts.sort((a,b) => (a.order || 99) - (b.order || 99));
 
-        snapshot.docs.forEach(docSnap => {
-            const p = docSnap.data();
-            const pId = docSnap.id;
-            
+        const productsByCategory = {};
+        allProducts.forEach(p => {
             if(!productsByCategory[p.cat]) productsByCategory[p.cat] = [];
-            productsByCategory[p.cat].push({ id: pId, ...p });
+            productsByCategory[p.cat].push(p);
 
             if(container && p.cat === currentCategory) {
                 const div = document.createElement('div');
@@ -719,8 +788,12 @@ function listenProducts() {
         });
 
         if(adminContainer) {
-            Object.keys(productsByCategory).sort().forEach(cat => {
-                adminContainer.innerHTML += `<div class="menu-group-title">${cat}</div>`;
+            Object.keys(productsByCategory).sort((a,b) => {
+                const catA = globalCategoriesList.find(c => c.name === a);
+                const catB = globalCategoriesList.find(c => c.name === b);
+                return (catA ? (catA.order || 99) : 99) - (catB ? (catB.order || 99) : 99);
+            }).forEach(cat => {
+                adminContainer.innerHTML += `<div class="menu-group-title"><span>${cat}</span></div>`;
                 productsByCategory[cat].forEach(p => {
                     const divA = document.createElement('div');
                     divA.className = `admin-list-item`;
@@ -730,17 +803,20 @@ function listenProducts() {
                     if(p.cal) attrHtml += `Kalori: ${p.cal} | `;
                     if(p.allergen) attrHtml += `Alerjen: ${p.allergen} | `;
                     
+                    let safeName = p.name.replace(/'/g, "\\'");
+                    let safeDesc = p.desc ? p.desc.replace(/'/g, "\\'") : '';
+                    
                     divA.innerHTML = `
                         <div class="info" style="${!p.stock ? 'opacity:0.5; filter:grayscale(1);' : ''}">
                             <strong>${p.name} ${!p.stock ? '<span style="color:var(--red); font-size:10px;">(TÜKENDİ)</span>' : ''}</strong>
                             <div style="font-size:11px; color:var(--gray); margin-bottom:5px;">
                                 ${attrHtml} ${p.vegan ? '<span style="color:var(--green); font-weight:900;">VEGAN</span>' : ''}
                             </div>
-                            <span style="color:var(--gray); font-size:12px; font-weight:900; letter-spacing:1px;">FİYAT: <span style="color:var(--accent);">${p.price} ₺</span></span>
+                            <span style="color:var(--gray); font-size:12px; font-weight:900; letter-spacing:1px;">FİYAT: <span style="color:var(--accent);">${p.price} ₺</span> | SIRA: <span style="color:var(--accent);">${p.order || 99}</span></span>
                         </div>
                         <div class="admin-actions">
                             <button class="action-btn ${p.stock ? 'btn-cancel' : 'btn-confirm'}" onclick="toggleStock('${p.id}', ${!p.stock})">${p.stock ? 'TÜKENDİ YAP' : 'SATIŞA AÇ'}</button>
-                            <button class="action-btn btn-blue" onclick="editProduct('${p.id}', '${p.name}', ${p.price}, '${p.desc}', '${p.cal}', '${p.allergen}', '${p.cat}', ${p.vegan})">DÜZENLE</button>
+                            <button class="action-btn btn-blue" onclick="editProduct('${p.id}', '${safeName}', ${p.price}, '${safeDesc}', '${p.cal || ''}', '${p.allergen || ''}', '${p.cat}', ${p.vegan}, ${p.order || 99}, ${p.stock})">DÜZENLE</button>
                             <button class="action-btn btn-red" onclick="deleteProduct('${p.id}')">SİL</button>
                         </div>
                     `;
@@ -759,16 +835,18 @@ window.deleteProduct = (id) => {
         showModal('BAŞARILI', 'Ürün silindi.', '', null, true);
     });
 };
-window.editProduct = (id, name, price, desc, cal, allergen, cat, vegan) => {
+window.editProduct = (id, name, price, desc, cal, allergen, cat, vegan, order, stock) => {
     editingProductId = id;
+    editingProductStock = stock;
     document.getElementById('product-form-title').textContent = "ÜRÜNÜ DÜZENLE";
     document.getElementById('new-product-name').value = name;
     document.getElementById('new-product-price').value = price;
-    document.getElementById('new-product-desc').value = desc !== 'undefined' ? desc : '';
-    document.getElementById('new-product-cal').value = cal !== 'undefined' ? cal : '';
-    document.getElementById('new-product-allergen').value = allergen !== 'undefined' ? allergen : '';
+    document.getElementById('new-product-desc').value = desc !== 'undefined' && desc !== 'null' ? desc : '';
+    document.getElementById('new-product-cal').value = cal !== 'undefined' && cal !== 'null' ? cal : '';
+    document.getElementById('new-product-allergen').value = allergen !== 'undefined' && allergen !== 'null' ? allergen : '';
     document.getElementById('new-product-category').value = cat;
     document.getElementById('new-product-vegan').checked = vegan === true;
+    document.getElementById('new-product-order').value = order || 99;
     
     document.getElementById('save-product-btn').textContent = "ÜRÜNÜ GÜNCELLE";
     document.getElementById('save-product-btn').className = "btn-green";
@@ -785,6 +863,7 @@ document.getElementById('cancel-edit-btn').addEventListener('click', () => {
     document.getElementById('cancel-edit-btn').style.display = 'none';
     document.querySelectorAll('.add-form input').forEach(i => {
         if(i.type === 'checkbox') i.checked = false;
+        else if(i.id === 'new-product-order' || i.id === 'cat-order') i.value = '99';
         else i.value = '';
     });
 });
@@ -798,7 +877,8 @@ document.getElementById('save-product-btn').addEventListener('click', async () =
         allergen: document.getElementById('new-product-allergen').value,
         cat: document.getElementById('new-product-category').value,
         vegan: document.getElementById('new-product-vegan').checked,
-        stock: true
+        order: parseInt(document.getElementById('new-product-order').value) || 99,
+        stock: editingProductId ? editingProductStock : true
     };
     if(data.name && data.price) {
         if(editingProductId) {
@@ -1534,7 +1614,7 @@ function listenQRCategoriesAndProducts() {
     let globalCats = [];
     let globalProds = [];
 
-    const renderQR = () => {
+    window.renderQR = () => {
         const catContainer = document.getElementById('qr-categories-container');
         const prodContainer = document.getElementById('qr-products-container');
         if(!catContainer || !prodContainer) return;
@@ -1574,13 +1654,15 @@ function listenQRCategoriesAndProducts() {
 
     const unsubC = onSnapshot(collection(db, "categories"), (snapshot) => {
         globalCats = [...snapshot.docs].map(d => d.data());
-        renderQR();
+        globalCats.sort((a,b) => (a.order || 99) - (b.order || 99));
+        if(typeof renderQR === 'function') renderQR();
     });
     globalUnsubscribes.push(unsubC);
 
     const unsubP = onSnapshot(collection(db, "products"), (snapshot) => {
         globalProds = [...snapshot.docs].map(d => d.data());
-        renderQR();
+        globalProds.sort((a,b) => (a.order || 99) - (b.order || 99));
+        if(typeof renderQR === 'function') renderQR();
     });
     globalUnsubscribes.push(unsubP);
 }
