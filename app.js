@@ -28,7 +28,7 @@ let globalOrders = [];
 let globalExpenses = [];
 let chartInstances = {};
 let globalCategoriesList = [];
-let globalProductsList = []; // Ürünleri hafızada tutmak için eklendi
+let globalProductsList = []; 
 
 const getOrderVal = (val) => (val === "" || val === null || val === undefined) ? 999 : Number(val);
 
@@ -655,7 +655,6 @@ document.getElementById('back-to-tables').addEventListener('click', () => {
     switchView('tables');
 });
 
-// ARAYÜZ VE DİNLEME MANTIKLARI BİRBİRİNDEN AYRILDI (MEMORY LEAK ÇÖZÜMÜ)
 function listenCategories() {
     if(window.unsubCats) window.unsubCats();
     window.unsubCats = onSnapshot(collection(db, "categories"), (snapshot) => {
@@ -682,17 +681,19 @@ function renderCategoriesUI() {
     if(catSelect) catSelect.innerHTML = '';
     if(editCatSelect) editCatSelect.innerHTML = '<option value="">Kategori Seçin</option>';
     
-    let validCurrentCat = false;
+    // HATA DÜZELTMESİ (LOGIC BUG): Liste taranmadan önce mevcut kategori listelenenler arasında var mı diye bakıyoruz.
+    let validCurrentCat = globalCategoriesList.some(c => c.name === currentCategory);
     
-    globalCategoriesList.forEach((cat, index) => {
-        if(cat.name === currentCategory) validCurrentCat = true;
-        if(index === 0 && (!currentCategory || !validCurrentCat)) currentCategory = cat.name;
-        
+    // Eğer seçili kategori veritabanında yoksa veya boşsa, en baştaki kategoriyi seçili yap
+    if(!validCurrentCat && globalCategoriesList.length > 0) {
+        currentCategory = globalCategoriesList[0].name;
+    }
+    
+    globalCategoriesList.forEach((cat) => {
         if(catOrder) {
             const btn = document.createElement('button');
             btn.className = `cat-btn ${currentCategory === cat.name ? 'active' : ''}`;
             btn.textContent = cat.name;
-            // Düzeltme: Tıklandığında yeniden listener açmak yerine sadece arayüz fonksiyonlarını tetikliyoruz
             btn.onclick = () => { 
                 currentCategory = cat.name; 
                 renderCategoriesUI(); 
@@ -718,11 +719,6 @@ function renderCategoriesUI() {
         editCatSelect.value = selectedCatId;
     }
     
-    if(!validCurrentCat && globalCategoriesList.length > 0) {
-        currentCategory = globalCategoriesList[0].name;
-    }
-    
-    // Uygulama ilk açıldığında ürünleri dinlemeye başla
     if(!window.unsubProds) listenProducts();
     else renderProductsUI();
 }
@@ -730,7 +726,7 @@ function renderCategoriesUI() {
 document.getElementById('add-category-btn').addEventListener('click', async () => {
     const name = document.getElementById('cat-name').value.trim().toUpperCase();
     const orderVal = document.getElementById('cat-order').value;
-    const order = orderVal !== '' ? parseInt(orderVal) : ''; // Varsayılan 99 kaldırıldı
+    const order = orderVal !== '' ? parseInt(orderVal) : ''; 
     
     if(name) {
         await addDoc(collection(db, "categories"), { name: name, order: order });
@@ -800,7 +796,6 @@ document.getElementById('delete-cat-btn').addEventListener('click', () => {
     });
 });
 
-// Ürün dinleme döngüsü ayrı fonksiyona alındı
 function listenProducts() {
     if(window.unsubProds) window.unsubProds();
     window.unsubProds = onSnapshot(collection(db, "products"), (snapshot) => {
@@ -918,7 +913,7 @@ document.getElementById('cancel-edit-btn').addEventListener('click', () => {
     document.getElementById('cancel-edit-btn').style.display = 'none';
     document.querySelectorAll('#product-form input').forEach(i => {
         if(i.type === 'checkbox') i.checked = false;
-        else i.value = ''; // Sıra numarası dahil hepsi boşaltılıyor
+        else i.value = ''; 
     });
 });
 
@@ -1664,7 +1659,6 @@ window.deleteExpense = (id) => {
     });
 };
 
-// QR Menüdeki sıraya göre listeleme düzeltildi
 function listenQRCategoriesAndProducts() {
     let globalCats = [];
     let globalProds = [];
