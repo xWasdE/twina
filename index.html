@@ -43,7 +43,7 @@
 
     <div id="login-screen" class="screen" style="display:none; justify-content:center; align-items:center;">
         <div class="theme-toggle-wrapper">
-            <button id="theme-toggle-login" class="theme-btn">🌓</button>
+            <button id="theme-toggle-login" class="theme-btn" onclick="toggleTheme()">🌓</button>
         </div>
         <div class="login-box">
             <img src="logo.png" alt="TWIN-A" class="logo" style="height:60px; margin-bottom:20px;" onerror="this.style.display='none'">
@@ -58,7 +58,7 @@
     </div>
 
     <div id="qr-menu-app" class="screen" style="display:none; background:var(--bg); color:var(--text); position:relative;">
-        <button id="qr-theme-toggle" class="theme-btn" style="position: absolute; top: 20px; right: 20px; z-index: 100;">🌓</button>
+        <button id="qr-theme-toggle" class="theme-btn" style="position: absolute; top: calc(20px + env(safe-area-inset-top)); right: 20px; z-index: 100;" onclick="toggleTheme()">🌓</button>
         <div class="qr-menu-header">
             <img src="logo.png" alt="TWIN-A" onerror="this.style.display='none'" style="height:40px; margin-bottom:10px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.2));">
             <h1 id="qr-company-name">TWIN-A</h1>
@@ -76,7 +76,7 @@
             </div>
             <div class="header-right">
                 <button id="show-qr-btn" class="btn-accent" style="font-size:10px; padding:6px 12px;">📱 QR MENÜ</button>
-                <button id="theme-toggle-app" class="theme-btn" title="Tema Değiştir">🌓</button>
+                <button id="theme-toggle-app" class="theme-btn" title="Tema Değiştir" onclick="toggleTheme()">🌓</button>
                 <div id="system-clock" class="system-clock">00:00:00</div>
                 <span id="active-user-name" class="hide-mobile" style="font-weight:900; font-size:12px;"></span>
                 <button id="logout-btn">ÇIKIŞ</button>
