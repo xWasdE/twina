@@ -43,7 +43,7 @@
 
     <div id="login-screen" class="screen" style="display:none; justify-content:center; align-items:center;">
         <div class="theme-toggle-wrapper">
-            <button id="theme-toggle-login" class="theme-btn" onclick="toggleTheme()">🌓</button>
+            <button id="theme-toggle-login" class="theme-btn">🌓</button>
         </div>
         <div class="login-box">
             <img src="logo.png" alt="TWIN-A" class="logo" style="height:60px; margin-bottom:20px;" onerror="this.style.display='none'">
@@ -57,9 +57,9 @@
         </div>
     </div>
 
-    <div id="qr-menu-app" class="screen" style="display:none; background:var(--bg); color:var(--text);">
-        <div class="qr-menu-header" style="position: relative;">
-            <button id="qr-theme-toggle" class="theme-btn" onclick="toggleTheme()" style="position: absolute; top: 20px; right: 20px; z-index: 100;">🌓</button>
+    <div id="qr-menu-app" class="screen" style="display:none; background:var(--bg); color:var(--text); position:relative;">
+        <button id="qr-theme-toggle" class="theme-btn" style="position: absolute; top: 20px; right: 20px; z-index: 100;">🌓</button>
+        <div class="qr-menu-header">
             <img src="logo.png" alt="TWIN-A" onerror="this.style.display='none'" style="height:40px; margin-bottom:10px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.2));">
             <h1 id="qr-company-name">TWIN-A</h1>
         </div>
@@ -76,7 +76,7 @@
             </div>
             <div class="header-right">
                 <button id="show-qr-btn" class="btn-accent" style="font-size:10px; padding:6px 12px;">📱 QR MENÜ</button>
-                <button id="theme-toggle-app" class="theme-btn" title="Tema Değiştir" onclick="toggleTheme()">🌓</button>
+                <button id="theme-toggle-app" class="theme-btn" title="Tema Değiştir">🌓</button>
                 <div id="system-clock" class="system-clock">00:00:00</div>
                 <span id="active-user-name" class="hide-mobile" style="font-weight:900; font-size:12px;"></span>
                 <button id="logout-btn">ÇIKIŞ</button>
@@ -150,25 +150,45 @@
 
             <main id="menu-view" class="view" style="display: none;">
                 <div class="admin-panel-layout">
-                    <div class="add-form">
-                        <h3 id="product-form-title">YENİ ÜRÜN EKLE</h3>
-                        <input type="text" id="new-product-name" placeholder="Ürün Adı" required>
-                        <input type="number" id="new-product-price" placeholder="Fiyat (₺)" required>
-                        <input type="text" id="new-product-desc" placeholder="İçerik Açıklaması">
-                        <div class="flex-row">
-                            <input type="text" id="new-product-cal" placeholder="Kalori (Örn: 120 kcal)">
-                            <input type="text" id="new-product-allergen" placeholder="Alerjenler (Süt vb.)">
-                        </div>
-                        <label class="flex-row" style="color:var(--text); font-weight:800; cursor:pointer; font-size:11px; margin: 5px 0;">
-                            <input type="checkbox" id="new-product-vegan" class="custom-checkbox"> VEGAN ÜRÜN
-                        </label>
-                        <div class="flex-col">
+                    <div class="flex-col" style="gap:20px; width: 280px; flex-shrink: 0;">
+                        <div class="add-form" style="width: 100%;">
+                            <h3 id="product-form-title">YENİ ÜRÜN EKLE</h3>
+                            <input type="text" id="new-product-name" placeholder="Ürün Adı" required>
+                            <input type="number" id="new-product-price" placeholder="Fiyat (₺)" required>
+                            <input type="text" id="new-product-desc" placeholder="İçerik Açıklaması">
+                            <input type="number" id="new-product-order" placeholder="Sıralama (Örn: 1, 2)" value="99">
+                            <div class="flex-row">
+                                <input type="text" id="new-product-cal" placeholder="Kalori (Örn: 120)">
+                                <input type="text" id="new-product-allergen" placeholder="Alerjenler (Süt)">
+                            </div>
+                            <label class="flex-row" style="color:var(--text); font-weight:800; cursor:pointer; font-size:11px; margin: 5px 0;">
+                                <input type="checkbox" id="new-product-vegan" class="custom-checkbox"> VEGAN ÜRÜN
+                            </label>
                             <select id="new-product-category" required></select>
-                            <button id="add-category-btn" type="button" class="btn-blue" style="font-size:10px; padding:8px; letter-spacing:1px;">+ YENİ KATEGORİ OLUŞTUR</button>
+                            <button id="save-product-btn" class="btn-accent" style="margin-top:10px; padding:10px; font-size:11px;">ÜRÜNÜ KAYDET</button>
+                            <button id="cancel-edit-btn" class="btn-cancel" style="display:none; margin-top:5px; padding:10px; font-size:11px;">İPTAL ET</button>
                         </div>
-                        <button id="save-product-btn" class="btn-accent" style="margin-top:10px; padding:10px; font-size:11px;">ÜRÜNÜ KAYDET</button>
-                        <button id="cancel-edit-btn" class="btn-cancel" style="display:none; margin-top:5px; padding:10px; font-size:11px;">İPTAL ET</button>
+                        
+                        <div class="add-form" style="width: 100%;">
+                            <h3>KATEGORİ YÖNETİMİ</h3>
+                            <input type="text" id="cat-name" placeholder="Yeni Kategori Adı">
+                            <input type="number" id="cat-order" placeholder="Sıralama (Örn: 1, 2)" value="99">
+                            <button id="add-category-btn" type="button" class="btn-green" style="font-size:10px; padding:10px; letter-spacing:1px;">+ YENİ KATEGORİ EKLE</button>
+                            
+                            <hr style="border:0; border-bottom:1px solid var(--border); margin:15px 0;">
+                            
+                            <select id="edit-cat-select">
+                                <option value="">Kategori Seçin</option>
+                            </select>
+                            <input type="text" id="edit-cat-name" placeholder="Seçili Kategori İsmi">
+                            <input type="number" id="edit-cat-order" placeholder="Seçili Kategori Sırası">
+                            <div class="flex-row">
+                                <button id="update-cat-btn" class="btn-blue" style="flex:1; padding:8px;">GÜNCELLE</button>
+                                <button id="delete-cat-btn" class="btn-red" style="flex:1; padding:8px;">SİL</button>
+                            </div>
+                        </div>
                     </div>
+                    
                     <div class="list-section">
                         <h3>MEVCUT MENÜ</h3>
                         <div id="admin-menu-list"></div>
