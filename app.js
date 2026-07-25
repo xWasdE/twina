@@ -31,19 +31,18 @@ const urlParams = new URLSearchParams(window.location.search);
 const isQRMode = urlParams.get('qr') === '1';
 const expectedHash = window.location.hash || '';
 
+window.toggleTheme = () => {
+    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    if(document.getElementById('dashboard-view') && document.getElementById('dashboard-view').style.display === 'block') {
+        if(typeof initDashboard === 'function') initDashboard(); 
+    }
+};
+
 function initTheme() {
     const savedTheme = localStorage.getItem('theme') || 'dark';
     document.documentElement.setAttribute('data-theme', savedTheme);
-    const toggleTheme = () => {
-        const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('theme', next);
-        if(document.getElementById('dashboard-view').style.display === 'block') {
-            initDashboard(); 
-        }
-    };
-    document.getElementById('theme-toggle-login').addEventListener('click', toggleTheme);
-    document.getElementById('theme-toggle-app').addEventListener('click', toggleTheme);
 }
 initTheme();
 
@@ -1586,7 +1585,6 @@ function listenQRCategoriesAndProducts() {
     globalUnsubscribes.push(unsubP);
 }
 
-// DASHBOARD LOGIC
 async function initDashboard() {
     const dashTotalOrders = document.getElementById('dash-total-orders');
     const dashTotalRev = document.getElementById('dash-total-revenue');
@@ -1625,7 +1623,6 @@ function applyDashboardRange(val) {
     const start = new Date();
 
     if (val === 'today') {
-        // start and end stay today
     } else if (val === 'yesterday') {
         start.setDate(start.getDate() - 1);
         end.setDate(end.getDate() - 1);
