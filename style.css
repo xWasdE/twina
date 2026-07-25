@@ -1,245 +1,373 @@
-:root {
-    --bg: #EAE6DB;
-    --card-bg: #F5F2EB;
-    --border: #D1C9B8;
-    --primary: #1A1918;
-    --accent: #BFA37D;
-    --text: #2C2A26;
-    --gray: #756D60;
-    --green: #4A5D4E;
-    --red: #8B453A;
-    --blue: #4B637B;
-    --hover-bg: #DFD8C8;
-    --font-head: 'Cinzel', serif;
-    --font-body: 'Montserrat', sans-serif;
-}
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>TWIN-A</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800;900&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
+    <meta name="theme-color" content="#141210">
+</head>
+<body>
 
-[data-theme="dark"] {
-    --bg: #141210;
-    --card-bg: #1C1A18;
-    --border: #2D2A26;
-    --primary: #0A0908;
-    --accent: #D4AF37;
-    --text: #F0EAD6;
-    --gray: #8A847A;
-    --green: #5C7561;
-    --red: #A65648;
-    --blue: #5C7A96;
-    --hover-bg: #262320;
-}
+    <div id="print-frame"></div>
 
-* { margin: 0; padding: 0; box-sizing: border-box; font-family: var(--font-body); }
-body { background-color: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; font-size: 13px; transition: background-color 0.3s, color 0.3s; overflow-x: hidden; touch-action: manipulation; }
+    <div id="custom-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h3 id="modal-title">BAŞLIK</h3>
+            <p id="modal-desc">Açıklama metni</p>
+            <div id="modal-inputs" class="modal-inputs"></div>
+            <div class="modal-actions" id="modal-actions-container">
+                <button id="modal-cancel" class="btn-cancel">İPTAL</button>
+                <button id="modal-confirm" class="btn-confirm">ONAYLA</button>
+            </div>
+        </div>
+    </div>
 
-h1, h2, h3, h4, h5, h6 { font-family: var(--font-head); }
+    <div id="404-screen" class="screen" style="display:none; justify-content:center; align-items:center; flex-direction:column;">
+        <h1 style="font-size:80px; color:var(--accent); font-weight:900; font-family:var(--font-head); letter-spacing:8px;">404</h1>
+        <h3 style="margin-bottom:30px; font-weight:900; color:var(--text); font-size:16px; letter-spacing:3px;">SAYFA BULUNAMADI</h3>
+        <button onclick="window.location.href='/'" class="btn-accent" style="padding:12px 30px; font-size:12px;">SİSTEME GERİ DÖN</button>
+    </div>
 
-.screen { display: none; min-height: 100vh; width: 100%; flex-direction: column; }
-.screen.active { display: flex; }
-.view-container { flex: 1; display: flex; flex-direction: column; width: 100%; position: relative; }
-.view { padding: 25px; display: none; width: 100%; flex: 1; }
-.view.active { display: block; }
+    <div id="maintenance-screen" class="screen" style="display:none; justify-content:center; align-items:center; flex-direction:column; background:var(--bg); color:var(--text); text-align:center; padding:20px;">
+        <img src="logo.png" alt="TWIN-A" class="logo" style="height:80px; filter: grayscale(1) opacity(0.3); margin-bottom:30px;" onerror="this.style.display='none'">
+        <h1 style="font-size:26px; color:var(--accent); font-family:var(--font-head); font-weight:900; letter-spacing:4px; margin-bottom:15px;">SİSTEM BAKIMDA</h1>
+        <p style="color:var(--gray); font-size:13px; max-width:450px; line-height:1.6; font-weight:700;">Sizlere daha iyi bir deneyim sunabilmek için altyapımızı güncelliyoruz. Lütfen kısa bir süre sonra tekrar deneyiniz.</p>
+        <button id="maintenance-admin-login-btn" class="btn-cancel" style="margin-top:30px; background:transparent; border:1px solid var(--border); color:var(--gray); font-size:11px; padding:10px 20px;">YÖNETİCİ GİRİŞİ</button>
+    </div>
 
-.flex-row { display: flex; gap: 8px; align-items: center; }
-.flex-col { display: flex; flex-direction: column; gap: 8px; }
+    <div id="login-screen" class="screen" style="display:none; justify-content:center; align-items:center;">
+        <div class="theme-toggle-wrapper">
+            <button id="theme-toggle-login" class="theme-btn">🌓</button>
+        </div>
+        <div class="login-box">
+            <img src="logo.png" alt="TWIN-A" class="logo" style="height:60px; margin-bottom:20px;" onerror="this.style.display='none'">
+            <h1>TWIN-A</h1>
+            <div id="login-error" class="error-box"></div>
+            <form id="login-form">
+                <input type="text" id="user-id" placeholder="İSİM VEYA ID" required autocomplete="off">
+                <input type="password" id="user-pass" placeholder="ŞİFRE" required>
+                <button type="submit">GİRİŞ YAP</button>
+            </form>
+        </div>
+    </div>
 
-input:not([type="checkbox"]), select, textarea { width: 100%; padding: 10px 12px; border: 2px solid var(--border); border-radius: 6px; font-weight: 700; font-size: 12px; background: var(--bg); color: var(--text); outline: none; transition: 0.3s; letter-spacing: 0.5px; }
-input:not([type="checkbox"]):focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.1); }
-input[type="date"] { cursor: pointer; color: var(--accent); }
+    <div id="qr-menu-app" class="screen" style="display:none; background:var(--bg); color:var(--text); position:relative;">
+        <button id="qr-theme-toggle" class="theme-btn" style="position:absolute; top:15px; right:15px; z-index:11;">🌓</button>
+        <div class="qr-menu-header">
+            <img src="logo.png" alt="TWIN-A" onerror="this.style.display='none'" style="height:40px; margin-bottom:10px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.2));">
+            <h1 id="qr-company-name">TWIN-A</h1>
+        </div>
+        <div class="qr-categories" id="qr-categories-container"></div>
+        <div class="qr-products" id="qr-products-container"></div>
+        <footer class="app-footer qr-footer">TWIN-A &copy; 2026</footer>
+    </div>
 
-.custom-checkbox { width: 16px !important; height: 16px !important; padding: 0 !important; margin: 0 !important; border: 2px solid var(--gray) !important; background: transparent !important; box-shadow: none !important; appearance: auto !important; outline: none !important; cursor: pointer; transition: none !important; }
+    <div id="main-app" class="screen" style="display:none;">
+        <div id="broadcast-banner" class="broadcast-banner" style="display: none;"></div>
+        <header>
+            <div class="header-left">
+                <h2 id="header-company-name">TWIN-A</h2>
+            </div>
+            <div class="header-right">
+                <button id="show-qr-btn" class="btn-accent" style="font-size:10px; padding:6px 12px;">📱 QR MENÜ</button>
+                <button id="theme-toggle-app" class="theme-btn" title="Tema Değiştir">🌓</button>
+                <div id="system-clock" class="system-clock">00:00:00</div>
+                <span id="active-user-name" class="hide-mobile" style="font-weight:900; font-size:12px;"></span>
+                <button id="logout-btn">ÇIKIŞ</button>
+            </div>
+        </header>
 
-button { font-family: var(--font-body); letter-spacing: 1px; text-transform: uppercase; }
+        <nav id="admin-nav" style="display: none;">
+            <button class="nav-btn active" data-target="tables-view">MASALAR</button>
+            <button class="nav-btn" data-target="menu-view">MENÜ</button>
+            <button class="nav-btn" data-target="staff-view">PERSONEL</button>
+            <button class="nav-btn" data-target="finance-view">KASA & GEÇMİŞ</button>
+            <button class="nav-btn" data-target="dashboard-view">DASHBOARD</button>
+            <button class="nav-btn" data-target="settings-view">AYARLAR</button>
+        </nav>
+        <nav id="staff-nav" style="display: none;">
+            <button class="nav-btn active" data-target="tables-view">MASALAR</button>
+            <button class="nav-btn" data-target="staff-settings-view">ŞİFREMİ DEĞİŞTİR</button>
+        </nav>
 
-.btn-cancel { background: var(--gray); color: #fff !important; padding: 8px 12px; border: none; border-radius: 4px; font-weight: 800; cursor: pointer; transition: 0.2s; font-size: 11px; }
-.btn-confirm { background: var(--text); color: var(--bg) !important; padding: 8px 12px; border: none; border-radius: 4px; font-weight: 800; cursor: pointer; transition: 0.2s; font-size: 11px; }
-.btn-accent { background: var(--accent); color: #11100F !important; padding: 8px 12px; border: none; border-radius: 4px; font-weight: 800; cursor: pointer; transition: 0.2s; font-size: 11px; }
-.btn-blue { background: var(--blue); color: #fff !important; padding: 8px 12px; border: none; border-radius: 4px; font-weight: 800; cursor: pointer; transition: 0.2s; font-size: 11px; }
-.btn-green { background: var(--green); color: #fff !important; padding: 8px 12px; border: none; border-radius: 4px; font-weight: 800; cursor: pointer; transition: 0.2s; font-size: 11px; }
-.btn-red { background: var(--red); color: #fff !important; padding: 8px 12px; border: none; border-radius: 4px; font-weight: 800; cursor: pointer; transition: 0.2s; font-size: 11px; }
+        <div class="view-container">
+            <main id="tables-view" class="view active">
+                <div class="table-legend">
+                    <span class="legend-item"><div class="box empty"></div> MÜSAİT</span>
+                    <span class="legend-item"><div class="box full"></div> DOLU</span>
+                    <span class="legend-item"><div class="box reserved"></div> REZERVE</span>
+                </div>
+                <div id="tables-container" class="grid-container"></div>
+            </main>
 
-.btn-cancel:hover, .btn-confirm:hover, .btn-accent:hover, .btn-blue:hover, .btn-green:hover, .btn-red:hover { filter: brightness(1.15); }
-.action-btn { padding: 5px 8px; font-size: 9px; border: none; border-radius: 3px; font-weight: 800; cursor: pointer; color: white; }
+            <main id="order-view" class="view" style="display: none;">
+                <div class="order-layout">
+                    <div class="menu-section">
+                        <div class="order-header" style="justify-content: space-between;">
+                            <div class="flex-row">
+                                <button id="back-to-tables" class="btn-cancel" style="padding:8px 16px; font-size:11px;">GERİ DÖN</button>
+                                <div>
+                                    <h2 id="current-table-name">MASA</h2>
+                                    <span id="current-order-id" class="order-id-badge"></span>
+                                </div>
+                            </div>
+                            <button id="transfer-table-btn" class="btn-blue" style="font-size:11px; padding:8px 12px;">🔄 TAŞI / BİRLEŞTİR</button>
+                        </div>
+                        <div id="categories-container" class="categories"></div>
+                        <div id="products-container" class="products"></div>
+                    </div>
+                    <div class="adisyon-section">
+                        <h3>ADİSYON</h3>
+                        <div id="adisyon-items" class="adisyon-list"></div>
+                        <div class="adisyon-footer">
+                            <div class="payment-logs" id="payment-logs"></div>
+                            <div class="total-row subtotal">
+                                <span>ARA TOPLAM:</span>
+                                <span id="adisyon-subtotal">0 ₺</span>
+                            </div>
+                            <div class="total-row remaining">
+                                <span>KALAN:</span>
+                                <span id="adisyon-total">0 ₺</span>
+                            </div>
+                            <div class="action-buttons-grid" style="grid-template-columns: 1fr 1fr;">
+                                <button id="partial-pay-btn" class="btn-blue">KISMİ ÖDEME</button>
+                                <button id="item-pay-btn" class="btn-green">ÜRÜN BAZLI ÖDE</button>
+                            </div>
+                            <div class="action-buttons-grid" style="grid-template-columns: 1fr;">
+                                <button id="print-order-btn" class="btn-accent">YAZDIR</button>
+                            </div>
+                            <button id="close-table-btn" class="btn-confirm" style="padding:14px; font-size:12px;">HESABI KES VE MASAYI KAPAT</button>
+                        </div>
+                    </div>
+                </div>
+            </main>
 
-.theme-toggle-wrapper { position: absolute; top: 15px; right: 15px; z-index: 10; }
-.theme-btn { background: var(--card-bg); border: 2px solid var(--border); border-radius: 50%; width: 35px; height: 35px; font-size: 16px; cursor: pointer; color: var(--text); box-shadow: 0 4px 10px rgba(0,0,0,0.1); transition: 0.3s; }
-.theme-btn:hover { border-color: var(--accent); transform: rotate(15deg); }
+            <main id="menu-view" class="view" style="display: none;">
+                <div class="admin-panel-layout">
+                    <div class="add-form">
+                        <h3 id="product-form-title">YENİ ÜRÜN EKLE</h3>
+                        <input type="text" id="new-product-name" placeholder="Ürün Adı" required>
+                        <input type="number" id="new-product-price" placeholder="Fiyat (₺)" required>
+                        <input type="text" id="new-product-desc" placeholder="İçerik Açıklaması">
+                        <div class="flex-row">
+                            <input type="text" id="new-product-cal" placeholder="Kalori (Örn: 120 kcal)">
+                            <input type="text" id="new-product-allergen" placeholder="Alerjenler (Süt vb.)">
+                        </div>
+                        <label class="flex-row" style="color:var(--text); font-weight:800; cursor:pointer; font-size:11px; margin: 5px 0;">
+                            <input type="checkbox" id="new-product-vegan" class="custom-checkbox"> VEGAN ÜRÜN
+                        </label>
+                        <div class="flex-col">
+                            <select id="new-product-category" required></select>
+                            <button id="add-category-btn" type="button" class="btn-blue" style="font-size:10px; padding:8px; letter-spacing:1px;">+ YENİ KATEGORİ OLUŞTUR</button>
+                        </div>
+                        <button id="save-product-btn" class="btn-accent" style="margin-top:10px; padding:10px; font-size:11px;">ÜRÜNÜ KAYDET</button>
+                        <button id="cancel-edit-btn" class="btn-cancel" style="display:none; margin-top:5px; padding:10px; font-size:11px;">İPTAL ET</button>
+                    </div>
+                    <div class="list-section">
+                        <h3>MEVCUT MENÜ</h3>
+                        <div id="admin-menu-list"></div>
+                    </div>
+                </div>
+            </main>
 
-.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(8px); }
-.modal-overlay.active { display: flex; }
-.modal-box { background: var(--card-bg); padding: 25px; border-radius: 8px; width: 380px; max-width: 90%; border-top: 4px solid var(--accent); box-shadow: 0 15px 40px rgba(0,0,0,0.5); }
-.modal-box h3 { font-weight: 900; font-size: 16px; margin-bottom: 10px; color: var(--text); letter-spacing: 2px; font-family: var(--font-head); text-align: center; }
-.modal-box p { color: var(--gray); margin-bottom: 15px; font-size: 12px; font-weight: 600; line-height: 1.5; word-wrap: break-word; text-align: center; }
-.modal-inputs { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
-.modal-actions { display: flex; gap: 10px; }
-.modal-actions button { flex: 1; padding: 10px; font-size: 11px; }
+            <main id="staff-view" class="view" style="display: none;">
+                <div class="admin-panel-layout">
+                    <div class="add-form">
+                        <h3>YENİ PERSONEL EKLE</h3>
+                        <input type="text" id="new-staff-name" placeholder="Personel Adı Soyadı" required>
+                        <input type="text" id="new-staff-pass" placeholder="Geçici Şifre" required>
+                        <select id="new-staff-role">
+                            <option value="waiter">Garson / Personel</option>
+                            <option value="admin">Yönetici (Admin)</option>
+                        </select>
+                        <button id="save-staff-btn" class="btn-accent" style="padding:10px; font-size:11px;">PERSONELİ KAYDET</button>
+                    </div>
+                    <div class="list-section">
+                        <h3>PERSONEL LİSTESİ</h3>
+                        <div id="admin-staff-list"></div>
+                    </div>
+                </div>
+            </main>
 
-#qr-display-box { background: var(--card-bg); padding:15px; border-radius:6px; text-align:center; }
-#qr-display-box img { max-width: 160px; width:100%; border-radius:6px; margin-bottom:12px; border: 3px solid var(--border); }
-#qr-display-box a { color: var(--accent); font-weight:800; font-size: 13px; word-break: break-all; text-decoration: none; }
+            <main id="finance-view" class="view" style="display: none;">
+                <div class="finance-layout">
+                    <div class="finance-header-grid">
+                        <div class="finance-card">
+                            <h4>SEÇİLİ GÜN CİROSU</h4>
+                            <span id="today-income">0 ₺</span>
+                        </div>
+                        <div class="finance-card expense-card">
+                            <h4>SEÇİLİ GÜN MASRAFI</h4>
+                            <span id="today-expense">0 ₺</span>
+                        </div>
+                        <div class="finance-card net-card">
+                            <h4>NET KASA</h4>
+                            <span id="today-net">0 ₺</span>
+                        </div>
+                        <div class="finance-card" style="grid-column: 1 / -1; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+                            <div>
+                                <h4>SEÇİLİ GÜN ÖDEME TİPLERİ</h4>
+                                <div id="finance-types" style="font-size:11px; font-weight:800; color:var(--text); margin-top:10px; display:flex; gap:20px;"></div>
+                            </div>
+                            <button id="z-report-btn" class="btn-accent" style="padding:10px 20px; font-size:11px;">📄 Z-RAPORU YAZDIR</button>
+                        </div>
+                    </div>
+                    
+                    <div class="finance-split">
+                        <div class="add-expense-section">
+                            <h3>MASRAF GİRİŞİ</h3>
+                            <input type="number" id="expense-amount" placeholder="Tutar (₺)" required>
+                            <input type="text" id="expense-desc" placeholder="Açıklama (Manav, Fatura vb.)" required>
+                            <button id="save-expense-btn" class="btn-red" style="padding:10px; font-size:11px;">MASRAFI KAYDET</button>
+                            
+                            <h4 id="expense-list-title" style="margin-top:20px; border-bottom:2px solid var(--border); padding-bottom:5px; font-weight:900; font-size:12px;">SEÇİLEN GÜNÜN MASRAFLARI</h4>
+                            <div id="expense-list" class="expense-list"></div>
+                        </div>
+                        
+                        <div class="history-section">
+                            <div class="flex-row" style="justify-content:space-between; align-items:center; border-bottom:2px solid var(--border); padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap;">
+                                <h3 style="border:none; margin:0; padding:0;">SİPARİŞ GEÇMİŞİ & LOGLAR</h3>
+                                <div class="flex-row">
+                                    <input type="date" id="history-date-filter" style="padding:6px 10px; font-size:11px; width:auto; border-radius:4px; cursor:pointer;">
+                                </div>
+                            </div>
+                            <div id="finance-history-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </main>
 
-.login-box { background: var(--card-bg); padding: 35px 25px; border-radius: 8px; box-shadow: 0 15px 40px rgba(0,0,0,0.15); border-top: 5px solid var(--accent); width: 340px; text-align: center; }
-.login-box h1 { letter-spacing: 6px; margin-bottom: 25px; font-weight: 900; font-size: 24px; color: var(--accent); font-family: var(--font-head); }
-.error-box { display: none; background: rgba(166, 86, 72, 0.1); color: var(--red); border: 2px solid var(--red); padding: 8px; border-radius: 4px; font-weight: 800; margin-bottom: 12px; font-size: 11px; letter-spacing: 1px; }
-.login-box input { margin-bottom: 12px; text-align: center; font-size: 13px; padding: 12px; }
-.login-box button { width: 100%; font-size: 13px; letter-spacing: 2px; padding: 14px; background: var(--accent); color: #11100F; border: none; border-radius: 4px; font-weight: 900; cursor: pointer; transition: 0.3s; }
-.login-box button:hover { background: var(--text); color: var(--bg); }
+            <main id="dashboard-view" class="view" style="display: none;">
+                <div class="finance-layout">
+                    <div class="flex-row" style="justify-content:space-between; align-items:center; border-bottom:2px dashed var(--border); padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap;">
+                        <h3 style="font-size:22px; color:var(--accent); font-family:var(--font-head); letter-spacing:4px; margin:0; border:none; padding:0;">GÖRSEL ANALİTİK</h3>
+                        <div class="flex-row" style="gap:15px;">
+                            <select id="dash-range-select" style="padding:10px 15px; font-size:12px; width:auto; border-radius:6px; cursor:pointer;">
+                                <option value="today">Bugün</option>
+                                <option value="yesterday">Dün</option>
+                                <option value="7" selected>Son 7 Gün</option>
+                                <option value="14">Son 14 Gün</option>
+                                <option value="30">Son 30 Gün</option>
+                                <option value="60">Son 60 Gün</option>
+                                <option value="90">Son 90 Gün</option>
+                                <option value="365">Son 1 Yıl</option>
+                                <option value="custom">Özel Tarih Belirle</option>
+                            </select>
+                            <div id="dash-custom-range" class="flex-row" style="display:none; gap:10px;">
+                                <input type="date" id="dash-start-date" style="padding:10px; font-size:12px; width:auto; border-radius:6px;">
+                                <span style="color:var(--gray); font-weight:900;">-</span>
+                                <input type="date" id="dash-end-date" style="padding:10px; font-size:12px; width:auto; border-radius:6px;">
+                                <button id="dash-apply-btn" class="btn-accent" style="padding:10px 20px; font-size:11px;">UYGULA</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="finance-header-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                        <div class="finance-card">
+                            <h4 style="font-size:11px;">TOPLAM SİPARİŞ</h4>
+                            <span id="dash-total-orders">0</span>
+                        </div>
+                        <div class="finance-card">
+                            <h4 style="font-size:11px;">TOPLAM CİRO</h4>
+                            <span id="dash-total-revenue">0 ₺</span>
+                        </div>
+                        <div class="finance-card">
+                            <h4 style="font-size:11px;">EN ÇOK SATAN ÜRÜN</h4>
+                            <span id="dash-best-item" style="font-size:18px;">Yükleniyor...</span>
+                        </div>
+                    </div>
+                    <div class="finance-split" style="grid-template-columns: 1fr 1fr;">
+                        <div class="history-section" style="padding:25px;">
+                            <h4 style="font-size:13px; color:var(--gray); margin-bottom:20px; letter-spacing:1px; border-bottom:1px solid var(--border); padding-bottom:10px;">CİRO GRAFİĞİ</h4>
+                            <canvas id="revenueChart"></canvas>
+                        </div>
+                        <div class="history-section" style="padding:25px;">
+                            <h4 style="font-size:13px; color:var(--gray); margin-bottom:20px; letter-spacing:1px; border-bottom:1px solid var(--border); padding-bottom:10px;">EN ÇOK SATAN 5 ÜRÜN</h4>
+                            <canvas id="productsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </main>
 
-.broadcast-banner { background: var(--accent); color: #11100F; text-align: center; font-weight: 900; padding: 6px; font-size: 11px; letter-spacing: 2px; animation: pulse 2.5s infinite; position: sticky; top: 0; z-index: 100; text-transform: uppercase; }
-@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
-header { background: var(--primary); color: #EAE6DB; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--accent); width: 100%; }
-.header-left h2 { font-weight: 900; letter-spacing: 3px; font-size: 18px; color: var(--accent); font-family: var(--font-head); margin:0;}
-.header-right { display: flex; align-items: center; gap: 12px; font-weight: 800; font-size: 11px; }
-.system-clock { font-family: monospace; font-size: 12px; color: var(--accent); background: var(--bg); padding: 4px 10px; border-radius: 3px; letter-spacing: 1.5px; border: 1px solid var(--border); }
-#logout-btn { background: var(--text); color: var(--bg) !important; padding: 5px 12px; font-size: 10px; border-radius: 3px; border: none; font-weight: 900; cursor: pointer; transition: 0.3s; letter-spacing: 1px; }
-#logout-btn:hover { background: var(--red); color: white !important; }
+            <main id="settings-view" class="view" style="display: none;">
+                <div class="admin-panel-layout">
+                    
+                    <div class="add-form">
+                        <h3>MASA YÖNETİMİ</h3>
+                        <p style="font-size:10px; color:var(--gray); margin-bottom:10px; line-height:1.4;">Sistemdeki masa sayısını arttırıp azaltabilirsiniz. Sayıyı düşürdüğünüzde en sondaki boş masalar silinir.</p>
+                        <div class="flex-row">
+                            <input type="number" id="table-count-input" placeholder="Masa Sayısı" min="1" style="flex:1;">
+                            <button id="update-table-count-btn" class="btn-confirm" style="padding:10px 12px; height: 100%;">GÜNCELLE</button>
+                        </div>
+                    </div>
 
-nav { background: var(--card-bg); padding: 10px 25px; display: flex; gap: 8px; border-bottom: 1px solid var(--border); overflow-x: auto; width: 100%; }
-nav::-webkit-scrollbar { display: none; }
-.nav-btn { padding: 8px 14px; font-size: 11px; font-weight: 900; color: var(--gray); border-radius: 4px; background: transparent; transition: 0.3s; white-space: nowrap; letter-spacing: 1px; border: 1px solid transparent; }
-.nav-btn:hover { border-color: var(--border); color: var(--text); }
-.nav-btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+                    <div class="add-form">
+                        <h3>BAKIM MODU</h3>
+                        <div style="background:var(--hover-bg); padding:15px; border-radius:6px; border:1px solid var(--border);">
+                            <p style="font-size:11px; color:var(--gray); margin-bottom:10px; font-weight:700; line-height:1.4;">Sistemi bakıma alırsanız garsonlar ve QR menüye giren müşteriler bakım ekranı görürler.</p>
+                            <button id="toggle-maintenance-btn" class="btn-cancel" style="width:100%; padding:10px; font-size:11px; letter-spacing:1px;"></button>
+                        </div>
+                    </div>
+                    
+                    <div class="add-form">
+                        <h3>FİRMA & SİSTEM AYARLARI</h3>
+                        <p style="font-size:10px; color:var(--gray); margin-bottom:8px;">(Bu bilgiler Adisyon ve Z-Raporunda yer alacaktır)</p>
+                        <input type="text" id="company-name" placeholder="Firma İsmi">
+                        <input type="text" id="company-phone" placeholder="Telefon Numarası">
+                        <textarea id="company-address" placeholder="Açık Adres" rows="2"></textarea>
+                        <div class="flex-row">
+                            <div style="flex:1;">
+                                <label style="font-weight:900; font-size:9px; color:var(--gray); margin-bottom:4px; display:block;">AÇILIŞ SAATİ</label>
+                                <input type="time" id="company-open">
+                            </div>
+                            <div style="flex:1;">
+                                <label style="font-weight:900; font-size:9px; color:var(--gray); margin-bottom:4px; display:block;">KAPANIŞ SAATİ</label>
+                                <input type="time" id="company-close">
+                            </div>
+                        </div>
+                        <button id="update-company-btn" class="btn-green" style="padding:10px; font-size:11px;">AYARLARI KAYDET</button>
+                    </div>
 
-.table-legend { display: flex; gap: 15px; margin-bottom: 20px; font-weight: 800; font-size: 11px; background: var(--card-bg); padding: 10px 15px; border-radius: 5px; width: fit-content; border: 1px solid var(--border); letter-spacing: 1px; }
-.legend-item { display: flex; align-items: center; gap: 6px; color: var(--text); }
-.box { width: 14px; height: 14px; border-radius: 2px; border: 1px solid transparent; }
-.box.empty { background: var(--bg); border-color: var(--green); }
-.box.full { background: var(--accent); border-color: var(--accent); }
-.box.reserved { background: var(--gray); border-color: var(--gray); }
+                    <div class="add-form">
+                        <h3>PERSONELE DUYURU YAYINLA</h3>
+                        <textarea id="broadcast-msg" placeholder="Tüm sistemlerde üstte görünecek mesajı yazın..." rows="3"></textarea>
+                        <button id="send-broadcast-btn" class="btn-blue" style="padding:10px; font-size:10px;">DUYURUYU YAYINLA</button>
+                        <button id="clear-broadcast-btn" class="btn-cancel" style="margin-top:6px; padding:10px; font-size:10px;">DUYURUYU KALDIR</button>
+                    </div>
 
-.grid-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; width: 100%; }
-.table-card { height: 90px; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; font-weight: 900; font-size: 16px; transition: 0.2s; border-top: 4px solid transparent; box-shadow: 0 4px 10px rgba(0,0,0,0.04); position: relative; background: var(--card-bg); letter-spacing: 1px; border-bottom: 1px solid var(--border); border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
-.table-card:hover { box-shadow: 0 6px 15px rgba(0,0,0,0.08); border-color: var(--accent); }
-.table-empty { border-top-color: var(--green); color: var(--green); }
-.table-full { border-top-color: var(--accent); color: var(--text); }
-.table-full .table-total { color: var(--accent); font-size: 13px; margin-top: 4px; font-weight: 900; font-family: var(--font-head); }
-.table-time { font-size: 8px; color: var(--gray); margin-top: 3px; font-weight: 700; letter-spacing: 0.5px; }
+                    <div class="add-form">
+                        <h3>KENDİ BİLGİLERİMİ GÜNCELLE</h3>
+                        <input type="text" id="admin-new-id" placeholder="Yeni ID / İsim">
+                        <input type="password" id="admin-new-pass" placeholder="Yeni Şifre">
+                        <button id="update-credentials-btn" class="btn-confirm" style="padding:10px; font-size:10px;">BİLGİLERİ GÜNCELLE</button>
+                    </div>
 
-.table-reserved { 
-    background: repeating-linear-gradient(45deg, var(--hover-bg), var(--hover-bg) 6px, transparent 6px, transparent 12px);
-    color: var(--text); 
-    border: 1px dashed var(--gray);
-    border-top: 4px solid var(--gray);
-}
-.res-name { font-size: 8px; background: var(--text); color: var(--bg); padding: 2px 6px; border-radius: 3px; position: absolute; top: 6px; font-weight: 900; letter-spacing: 1px; text-align: center; max-width: 90%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                </div>
+            </main>
 
-.order-layout { display: flex; gap: 20px; height: calc(100vh - 170px); width: 100%; }
-.menu-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.order-header { display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }
-#current-table-name { font-size: 22px; font-weight: 900; letter-spacing: 1px; color: var(--accent); font-family: var(--font-head); margin:0;}
-.order-id-badge { font-size: 9px; background: var(--bg); color: var(--gray); padding: 3px 6px; border-radius: 3px; font-weight: 800; border: 1px solid var(--border); letter-spacing: 1px; }
-.categories { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 10px; flex-shrink: 0; }
-.categories::-webkit-scrollbar { display: none; }
-.cat-btn { padding: 8px 16px; border-radius: 15px; border: 1px solid var(--border); background: var(--card-bg); font-weight: 800; font-size: 11px; color: var(--gray); white-space: nowrap; cursor: pointer; transition: 0.3s; letter-spacing: 1px; }
-.cat-btn.active { background: var(--accent); color: #11100F; border-color: var(--accent); }
-.products { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; overflow-y: auto; padding: 4px; align-content: start; }
-.product-card { background: var(--card-bg); padding: 12px; border-radius: 5px; border: 1px solid var(--border); cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; min-height: 80px; transition: 0.2s; }
-.product-card:hover { border-color: var(--accent); box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
-.product-card.out-of-stock { opacity: 0.4; pointer-events: none; border-color: var(--red); filter: grayscale(1); }
-.prod-name { font-weight: 900; font-size: 11px; color: var(--text); line-height: 1.3; letter-spacing: 1px; font-family: var(--font-head); white-space: normal; overflow-wrap: break-word; word-break: break-word; }
-.prod-price { color: var(--accent); font-weight: 900; font-size: 14px; margin-top: 8px; letter-spacing: 1px; }
-.prod-badges { display: flex; gap: 3px; margin-top: 5px; flex-wrap: wrap; }
-.mini-badge { font-size: 7px; padding: 2px 4px; border-radius: 2px; background: var(--bg); color: var(--gray); font-weight: 800; border: 1px solid var(--border); letter-spacing: 1px; }
+            <main id="staff-settings-view" class="view" style="display: none;">
+                <div class="admin-panel-layout">
+                    <div class="add-form">
+                        <h3>ŞİFREMİ DEĞİŞTİR</h3>
+                        <input type="password" id="staff-old-pass" placeholder="Mevcut Şifreniz" required>
+                        <input type="password" id="staff-new-pass" placeholder="Yeni Şifreniz" required>
+                        <button id="update-staff-pass-btn" class="btn-confirm" style="padding:10px; font-size:11px;">ŞİFREYİ GÜNCELLE</button>
+                    </div>
+                </div>
+            </main>
+            
+            <footer class="app-footer">
+                TWIN-A &copy; 2026
+            </footer>
+        </div>
+    </div>
 
-.adisyon-section { width: 340px; background: var(--card-bg); border-radius: 6px; border-top: 4px solid var(--accent); display: flex; flex-direction: column; padding: 15px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); flex-shrink: 0; border-left: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.adisyon-section h3 { font-size: 16px; font-weight: 900; letter-spacing: 2px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px; color: var(--accent); text-align: center; }
-.adisyon-list { flex: 1; overflow-y: auto; padding-bottom: 8px; margin-bottom: 10px; }
-.adisyon-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--border); }
-.item-info { display: flex; flex-direction: column; gap: 2px; }
-.item-name { font-weight: 800; font-size: 11px; color: var(--text); letter-spacing: 1px; font-family: var(--font-head); }
-.item-waiter { font-size: 8px; color: var(--gray); font-weight: 800; }
-.item-price { font-weight: 900; font-size: 12px; color: var(--accent); }
-.item-deleted { text-decoration: line-through; color: var(--red); opacity: 0.7; }
-.del-item-btn { background: transparent; color: var(--red) !important; border: none; font-size: 12px; cursor: pointer; padding: 0 4px; font-weight: 900; }
-.note-item-btn { background: transparent; color: var(--blue) !important; border: none; font-size: 9px; cursor: pointer; padding: 0 4px; font-weight: 900; }
-.payment-logs { margin-bottom: 8px; font-size: 9px; font-weight: 800; color: var(--blue); line-height: 1.3; letter-spacing: 1px; }
-.total-row { display: flex; justify-content: space-between; font-weight: 800; font-size: 11px; color: var(--gray); margin-bottom: 6px; letter-spacing: 1px; }
-.total-row.remaining { font-size: 18px; color: var(--text); margin-bottom: 12px; margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
-.total-row.remaining span:last-child { color: var(--accent); }
-.action-buttons-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
-.adisyon-footer button { width: 100%; font-size: 10px; border-radius: 4px; letter-spacing: 1px; padding: 10px; }
-
-.admin-panel-layout { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; width: 100%; }
-.add-form { width: 280px; background: var(--card-bg); padding: 20px; border-radius: 6px; box-shadow: 0 6px 15px rgba(0,0,0,0.04); display: flex; flex-direction: column; gap: 10px; border-top: 4px solid var(--accent); border-left: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.add-form h3 { font-size: 12px; font-weight: 900; letter-spacing: 1px; border-bottom: 1px solid var(--border); padding-bottom: 8px; color: var(--text); font-family: var(--font-head); margin:0; }
-.list-section { flex: 1; background: var(--card-bg); padding: 20px; border-radius: 6px; box-shadow: 0 6px 15px rgba(0,0,0,0.04); min-width: 280px; border: 1px solid var(--border); }
-.list-section h3 { font-size: 14px; font-weight: 900; letter-spacing: 1px; margin-bottom: 15px; margin-top:0; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 8px; font-family: var(--font-head); }
-.admin-list-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 10px; background: var(--bg); transition: 0.3s; }
-.admin-list-item.out-of-stock-admin { opacity: 0.5; filter: grayscale(1); border-color: var(--red); }
-.admin-list-item:hover { border-color: var(--accent); }
-.admin-list-item.passive { opacity: 0.5; border-left: 4px solid var(--red); }
-.admin-list-item .info strong { font-size: 12px; font-weight: 900; display: block; margin-bottom: 4px; color: var(--text); letter-spacing: 1px; font-family: var(--font-head); }
-.admin-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end;}
-.menu-group-title { font-size: 14px; font-weight: 900; margin: 20px 0 10px 0; color: var(--accent); border-bottom: 1px dashed var(--border); padding-bottom: 6px; letter-spacing: 2px; font-family: var(--font-head); }
-
-.finance-layout { display: flex; flex-direction: column; gap: 20px; width: 100%; }
-.finance-header-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-.finance-card { background: var(--card-bg); padding: 18px; border-radius: 5px; border-left: 6px solid var(--blue); box-shadow: 0 6px 15px rgba(0,0,0,0.04); border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.finance-card h4 { color: var(--gray); font-size: 10px; font-weight: 900; letter-spacing: 1px; margin-bottom: 6px; margin-top:0; }
-.finance-card span { font-size: 20px; font-weight: 900; color: var(--text); letter-spacing: 1px; }
-.expense-card { border-left-color: var(--red); } .expense-card span { color: var(--red); }
-.net-card { border-left-color: var(--green); } .net-card span { color: var(--green); }
-.finance-split { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
-.add-expense-section, .history-section { background: var(--card-bg); padding: 20px; border-radius: 5px; box-shadow: 0 6px 15px rgba(0,0,0,0.04); border: 1px solid var(--border); }
-.expense-item { padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; font-size: 10px; font-weight: 900; align-items: center; letter-spacing: 1px; }
-.history-group-date { background: var(--primary); color: #EAE6DB; padding: 8px 15px; font-weight: 900; font-size: 12px; letter-spacing: 2px; border-radius: 3px; margin: 15px 0 10px 0; }
-.history-item { border: 1px solid var(--border); border-radius: 3px; margin-bottom: 10px; overflow: hidden; background: var(--bg); transition: 0.3s; }
-.history-item:hover { border-color: var(--accent); }
-.history-header { padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; font-weight: 900; cursor: pointer; font-size: 11px; color: var(--text); letter-spacing: 1px; }
-.history-body { padding: 15px; border-top: 1px solid var(--border); display: none; background: var(--card-bg); font-size: 10px; }
-.history-item.open .history-body { display: block; }
-.log-line { color: var(--gray); padding: 4px 0; border-bottom: 1px dashed var(--border); font-weight: 800; line-height: 1.4; letter-spacing: 1px; }
-.log-time { font-weight: 900; color: var(--accent); margin-right: 4px; }
-
-#qr-menu-app.active { display:flex; flex-direction:column; min-height:100vh; background: var(--bg); }
-.qr-menu-header { text-align: center; padding: 25px 15px 20px; border-bottom: 1px solid var(--border); background: var(--card-bg); box-shadow: 0 3px 15px rgba(0,0,0,0.04); }
-#qr-company-name { color: var(--text); font-weight: 900; letter-spacing: 6px; font-size: 20px; font-family: var(--font-head); margin:0;}
-.qr-categories { display: flex; gap: 8px; overflow-x: auto; padding: 10px 15px; background: var(--bg); position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--border); }
-.qr-categories::-webkit-scrollbar { display: none; }
-.qr-cat-btn { background: var(--card-bg); border: 1px solid var(--border); color: var(--gray); padding: 6px 14px; border-radius: 15px; font-weight: 900; font-size: 10px; white-space: nowrap; cursor: pointer; transition: 0.3s; letter-spacing: 1px; box-shadow: 0 1px 5px rgba(0,0,0,0.02); }
-.qr-cat-btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
-.qr-products { padding: 15px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; max-width: 900px; margin: 0 auto; width: 100%; flex: 1; align-content: start; }
-.qr-product-card { background: var(--card-bg); border: 1px solid var(--border); padding: 12px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; transition: 0.3s; box-shadow: 0 3px 10px rgba(0,0,0,0.03); min-height: 70px; }
-.qr-product-card:hover { border-color: var(--accent); }
-.qr-prod-info { display: flex; flex-direction: column; gap: 3px; flex: 1; padding-right: 8px; min-width: 0; }
-.qr-prod-name { font-size: 11px; font-weight: 900; color: var(--text); letter-spacing: 1px; font-family: var(--font-head); white-space: normal; overflow-wrap: break-word; word-break: break-word; }
-.qr-prod-desc { font-size: 9px; color: var(--gray); line-height: 1.3; font-weight: 700; white-space: normal; overflow-wrap: break-word; word-break: break-word; }
-.qr-prod-price { font-size: 13px; font-weight: 900; color: var(--accent); white-space: nowrap; letter-spacing: 1px; flex-shrink: 0; }
-.qr-badge { font-size: 7px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 2px; color: var(--gray); display: inline-block; width: fit-content; margin-top: 3px; font-weight: 800; letter-spacing: 1px; }
-
-.app-footer { background: var(--primary); color: var(--gray); text-align: center; padding: 10px; font-size: 9px; font-weight: 800; letter-spacing: 1px; border-top: 1px solid var(--accent); margin-top: auto; text-transform: uppercase; }
-.qr-footer { border-top: none; }
-
-#print-frame { display: none; background: white; color: black; font-family: monospace; padding: 0; font-size: 12px; }
-@media print {
-    @page { margin: 0; size: auto; }
-    html, body { height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: white !important; }
-    body > *:not(#print-frame) { display: none !important; }
-    
-    #print-frame { display: block !important; position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; margin: 0 !important; padding: 5mm !important; box-sizing: border-box !important; }
-    
-    .print-flex { display: flex !important; justify-content: space-between !important; margin-bottom: 3px !important; }
-    .print-bold { font-weight: bold !important; }
-    .print-div { border-bottom: 1px dashed black !important; margin: 8px 0 !important; display: block !important; }
-}
-
-@media (max-width: 768px) {
-    .hide-mobile { display: none; }
-    .header-left h2 { font-size: 14px; letter-spacing: 2px; }
-    .header-right { font-size: 10px; gap: 8px; }
-    .view { padding: 12px; }
-    .grid-container { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
-    .table-card { height: 80px; font-size: 14px; }
-    .table-card .table-total { font-size: 12px; }
-    
-    .order-layout { flex-direction: column; height: auto; }
-    .menu-section { overflow: visible; }
-    .products { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); max-height: 40vh; }
-    .adisyon-section { width: 100%; border-radius: 6px; padding: 15px; }
-    
-    .admin-panel-layout { flex-direction: column; gap: 15px; }
-    .add-form, .list-section { width: 100%; min-width: auto; padding: 15px; }
-    .finance-split { grid-template-columns: 1fr; gap: 15px; }
-    .qr-products { grid-template-columns: 1fr; padding: 12px; }
-
-    input:not([type="checkbox"]), select, textarea { font-size: 16px !important; }
-}
+    <script type="module" src="app.js"></script>
+</body>
+</html>
