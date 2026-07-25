@@ -213,8 +213,10 @@ function applyGlobalSettings() {
     if(companyInfo.broadcast && companyInfo.broadcast.trim() !== "") {
         banner.innerHTML = `📢 <b>ÖZEL DUYURU:</b> ${companyInfo.broadcast}`;
         banner.style.display = 'block';
+        document.body.classList.add('has-broadcast');
     } else {
         banner.style.display = 'none';
+        document.body.classList.remove('has-broadcast');
     }
 
     const mntBtn = document.getElementById('toggle-maintenance-btn');
@@ -1629,7 +1631,7 @@ function listenQRCategoriesAndProducts() {
             const btn = document.createElement('button');
             btn.className = `qr-cat-btn ${currentCategory === c.name ? 'active' : ''}`;
             btn.textContent = c.name;
-            btn.onclick = () => { currentCategory = c.name; renderQR(); };
+            btn.onclick = () => { currentCategory = c.name; window.renderQR(); };
             catContainer.appendChild(btn);
         });
 
@@ -1655,14 +1657,14 @@ function listenQRCategoriesAndProducts() {
     const unsubC = onSnapshot(collection(db, "categories"), (snapshot) => {
         globalCats = [...snapshot.docs].map(d => d.data());
         globalCats.sort((a,b) => (a.order || 99) - (b.order || 99));
-        if(typeof renderQR === 'function') renderQR();
+        if(typeof window.renderQR === 'function') window.renderQR();
     });
     globalUnsubscribes.push(unsubC);
 
     const unsubP = onSnapshot(collection(db, "products"), (snapshot) => {
         globalProds = [...snapshot.docs].map(d => d.data());
         globalProds.sort((a,b) => (a.order || 99) - (b.order || 99));
-        if(typeof renderQR === 'function') renderQR();
+        if(typeof window.renderQR === 'function') window.renderQR();
     });
     globalUnsubscribes.push(unsubP);
 }
