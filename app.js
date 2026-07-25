@@ -28,6 +28,9 @@ let globalOrders = [];
 let globalExpenses = [];
 let chartInstances = {};
 let globalCategoriesList = [];
+let globalProductsList = []; // Ürünleri hafızada tutmak için eklendi
+
+const getOrderVal = (val) => (val === "" || val === null || val === undefined) ? 999 : Number(val);
 
 const urlParams = new URLSearchParams(window.location.search);
 const isQRMode = urlParams.get('qr') === '1';
@@ -334,7 +337,7 @@ async function startApp() {
 
     switchView('tables');
     listenTables();
-    listenCategories();
+    listenCategories(); 
     
     if(currentUser.role === 'admin') { 
         listenStaff(); 
@@ -652,72 +655,87 @@ document.getElementById('back-to-tables').addEventListener('click', () => {
     switchView('tables');
 });
 
+// ARAYÜZ VE DİNLEME MANTIKLARI BİRBİRİNDEN AYRILDI (MEMORY LEAK ÇÖZÜMÜ)
 function listenCategories() {
-    const unsub = onSnapshot(collection(db, "categories"), (snapshot) => {
+    if(window.unsubCats) window.unsubCats();
+    window.unsubCats = onSnapshot(collection(db, "categories"), (snapshot) => {
         globalCategoriesList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        globalCategoriesList.sort((a,b) => (a.order || 99) - (b.order || 99));
+        globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
         
-        const catOrder = document.getElementById('categories-container');
-        const catSelect = document.getElementById('new-product-category');
-        const editCatSelect = document.getElementById('edit-cat-select');
-        
-        let selectedCatId = editCatSelect ? editCatSelect.value : '';
-        
-        if(catOrder) catOrder.innerHTML = ''; 
-        if(catSelect) catSelect.innerHTML = '';
-        if(editCatSelect) editCatSelect.innerHTML = '<option value="">Kategori Seçin</option>';
-        
-        let validCurrentCat = false;
-        
-        globalCategoriesList.forEach((cat, index) => {
-            if(cat.name === currentCategory) validCurrentCat = true;
-            if(index === 0 && (!currentCategory || !validCurrentCat)) currentCategory = cat.name;
-            
-            if(catOrder) {
-                const btn = document.createElement('button');
-                btn.className = `cat-btn ${currentCategory === cat.name ? 'active' : ''}`;
-                btn.textContent = cat.name;
-                btn.onclick = () => { currentCategory = cat.name; listenCategories(); listenProducts(); };
-                catOrder.appendChild(btn);
-            }
-
-            if(catSelect) {
-                const opt = document.createElement('option');
-                opt.value = cat.name; opt.textContent = cat.name;
-                catSelect.appendChild(opt);
-            }
-            
-            if(editCatSelect) {
-                const opt = document.createElement('option');
-                opt.value = cat.id; opt.textContent = cat.name;
-                editCatSelect.appendChild(opt);
-            }
-        });
-        
-        if(editCatSelect && selectedCatId) {
-            editCatSelect.value = selectedCatId;
-        }
-        
-        if(!validCurrentCat && globalCategoriesList.length > 0) {
-            currentCategory = globalCategoriesList[0].name;
-        }
-        
-        listenProducts();
+        renderCategoriesUI();
         
         if(isQRMode && typeof window.renderQR === 'function') {
             window.renderQR();
         }
     });
-    globalUnsubscribes.push(unsub);
+    globalUnsubscribes.push(window.unsubCats);
+}
+
+function renderCategoriesUI() {
+    const catOrder = document.getElementById('categories-container');
+    const catSelect = document.getElementById('new-product-category');
+    const editCatSelect = document.getElementById('edit-cat-select');
+    
+    let selectedCatId = editCatSelect ? editCatSelect.value : '';
+    
+    if(catOrder) catOrder.innerHTML = ''; 
+    if(catSelect) catSelect.innerHTML = '';
+    if(editCatSelect) editCatSelect.innerHTML = '<option value="">Kategori Seçin</option>';
+    
+    let validCurrentCat = false;
+    
+    globalCategoriesList.forEach((cat, index) => {
+        if(cat.name === currentCategory) validCurrentCat = true;
+        if(index === 0 && (!currentCategory || !validCurrentCat)) currentCategory = cat.name;
+        
+        if(catOrder) {
+            const btn = document.createElement('button');
+            btn.className = `cat-btn ${currentCategory === cat.name ? 'active' : ''}`;
+            btn.textContent = cat.name;
+            // Düzeltme: Tıklandığında yeniden listener açmak yerine sadece arayüz fonksiyonlarını tetikliyoruz
+            btn.onclick = () => { 
+                currentCategory = cat.name; 
+                renderCategoriesUI(); 
+                renderProductsUI(); 
+            };
+            catOrder.appendChild(btn);
+        }
+
+        if(catSelect) {
+            const opt = document.createElement('option');
+            opt.value = cat.name; opt.textContent = cat.name;
+            catSelect.appendChild(opt);
+        }
+        
+        if(editCatSelect) {
+            const opt = document.createElement('option');
+            opt.value = cat.id; opt.textContent = cat.name;
+            editCatSelect.appendChild(opt);
+        }
+    });
+    
+    if(editCatSelect && selectedCatId) {
+        editCatSelect.value = selectedCatId;
+    }
+    
+    if(!validCurrentCat && globalCategoriesList.length > 0) {
+        currentCategory = globalCategoriesList[0].name;
+    }
+    
+    // Uygulama ilk açıldığında ürünleri dinlemeye başla
+    if(!window.unsubProds) listenProducts();
+    else renderProductsUI();
 }
 
 document.getElementById('add-category-btn').addEventListener('click', async () => {
     const name = document.getElementById('cat-name').value.trim().toUpperCase();
-    const order = parseInt(document.getElementById('cat-order').value) || 99;
+    const orderVal = document.getElementById('cat-order').value;
+    const order = orderVal !== '' ? parseInt(orderVal) : ''; // Varsayılan 99 kaldırıldı
+    
     if(name) {
         await addDoc(collection(db, "categories"), { name: name, order: order });
         document.getElementById('cat-name').value = '';
-        document.getElementById('cat-order').value = '99';
+        document.getElementById('cat-order').value = '';
         showModal('BAŞARILI', 'Kategori eklendi.', '', null, true);
     }
 });
@@ -727,7 +745,7 @@ document.getElementById('edit-cat-select').addEventListener('change', (e) => {
     const cat = globalCategoriesList.find(c => c.id === catId);
     if(cat) {
         document.getElementById('edit-cat-name').value = cat.name;
-        document.getElementById('edit-cat-order').value = cat.order || 99;
+        document.getElementById('edit-cat-order').value = cat.order !== undefined ? cat.order : '';
     } else {
         document.getElementById('edit-cat-name').value = '';
         document.getElementById('edit-cat-order').value = '';
@@ -737,7 +755,8 @@ document.getElementById('edit-cat-select').addEventListener('change', (e) => {
 document.getElementById('update-cat-btn').addEventListener('click', async () => {
     const catId = document.getElementById('edit-cat-select').value;
     const newName = document.getElementById('edit-cat-name').value.trim().toUpperCase();
-    const newOrder = parseInt(document.getElementById('edit-cat-order').value) || 99;
+    const orderVal = document.getElementById('edit-cat-order').value;
+    const newOrder = orderVal !== '' ? parseInt(orderVal) : '';
     
     if(!catId || !newName) {
         showModal('HATA', 'Lütfen güncellenecek kategoriyi seçin ve yeni ismi girin.', '', null, true);
@@ -781,79 +800,86 @@ document.getElementById('delete-cat-btn').addEventListener('click', () => {
     });
 });
 
+// Ürün dinleme döngüsü ayrı fonksiyona alındı
 function listenProducts() {
-    const unsub = onSnapshot(collection(db, "products"), (snapshot) => {
-        const container = document.getElementById('products-container');
-        const adminContainer = document.getElementById('admin-menu-list');
-        if(container) container.innerHTML = '';
-        if(adminContainer) adminContainer.innerHTML = '';
+    if(window.unsubProds) window.unsubProds();
+    window.unsubProds = onSnapshot(collection(db, "products"), (snapshot) => {
+        globalProductsList = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+        renderProductsUI();
+    });
+    globalUnsubscribes.push(window.unsubProds);
+}
 
-        let allProducts = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
-        allProducts.sort((a,b) => (a.order || 99) - (b.order || 99));
+function renderProductsUI() {
+    const container = document.getElementById('products-container');
+    const adminContainer = document.getElementById('admin-menu-list');
+    if(container) container.innerHTML = '';
+    if(adminContainer) adminContainer.innerHTML = '';
 
-        const productsByCategory = {};
-        allProducts.forEach(p => {
-            if(!productsByCategory[p.cat]) productsByCategory[p.cat] = [];
-            productsByCategory[p.cat].push(p);
+    let allProducts = [...globalProductsList];
+    allProducts.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
 
-            if(container && p.cat === currentCategory) {
-                const div = document.createElement('div');
-                div.className = `product-card ${!p.stock ? 'out-of-stock' : ''}`;
-                div.innerHTML = `
-                    <div>
-                        <div class="prod-name">${p.name}</div>
-                        <div class="prod-badges">
-                            ${p.cal ? `<span class="mini-badge">Kalori: ${p.cal}</span>` : ''}
-                            ${p.allergen ? `<span class="mini-badge" style="color:var(--accent); background:transparent; border-color:var(--accent);">Alerjen: ${p.allergen}</span>` : ''}
-                            ${p.vegan ? `<span class="mini-badge" style="color:var(--green); border-color:var(--green); background:transparent;">VEGAN</span>` : ''}
-                        </div>
+    const productsByCategory = {};
+    allProducts.forEach(p => {
+        if(!productsByCategory[p.cat]) productsByCategory[p.cat] = [];
+        productsByCategory[p.cat].push(p);
+
+        if(container && p.cat === currentCategory) {
+            const div = document.createElement('div');
+            div.className = `product-card ${!p.stock ? 'out-of-stock' : ''}`;
+            div.innerHTML = `
+                <div>
+                    <div class="prod-name">${p.name}</div>
+                    <div class="prod-badges">
+                        ${p.cal ? `<span class="mini-badge">Kalori: ${p.cal}</span>` : ''}
+                        ${p.allergen ? `<span class="mini-badge" style="color:var(--accent); background:transparent; border-color:var(--accent);">Alerjen: ${p.allergen}</span>` : ''}
+                        ${p.vegan ? `<span class="mini-badge" style="color:var(--green); border-color:var(--green); background:transparent;">VEGAN</span>` : ''}
                     </div>
-                    <div class="prod-price">${p.price} ₺</div>
-                `;
-                if(p.stock) div.addEventListener('click', () => addItemToOrder(p));
-                container.appendChild(div);
-            }
-        });
-
-        if(adminContainer) {
-            Object.keys(productsByCategory).sort((a,b) => {
-                const catA = globalCategoriesList.find(c => c.name === a);
-                const catB = globalCategoriesList.find(c => c.name === b);
-                return (catA ? (catA.order || 99) : 99) - (catB ? (catB.order || 99) : 99);
-            }).forEach(cat => {
-                adminContainer.innerHTML += `<div class="menu-group-title"><span>${cat}</span></div>`;
-                productsByCategory[cat].forEach(p => {
-                    const divA = document.createElement('div');
-                    divA.className = `admin-list-item`;
-                    
-                    let attrHtml = '';
-                    if(p.desc) attrHtml += `İçerik: ${p.desc} | `;
-                    if(p.cal) attrHtml += `Kalori: ${p.cal} | `;
-                    if(p.allergen) attrHtml += `Alerjen: ${p.allergen} | `;
-                    
-                    let safeName = p.name.replace(/'/g, "\\'");
-                    let safeDesc = p.desc ? p.desc.replace(/'/g, "\\'") : '';
-                    
-                    divA.innerHTML = `
-                        <div class="info" style="${!p.stock ? 'opacity:0.5; filter:grayscale(1);' : ''}">
-                            <strong>${p.name} ${!p.stock ? '<span style="color:var(--red); font-size:10px;">(TÜKENDİ)</span>' : ''}</strong>
-                            <div style="font-size:11px; color:var(--gray); margin-bottom:5px;">
-                                ${attrHtml} ${p.vegan ? '<span style="color:var(--green); font-weight:900;">VEGAN</span>' : ''}
-                            </div>
-                            <span style="color:var(--gray); font-size:12px; font-weight:900; letter-spacing:1px;">FİYAT: <span style="color:var(--accent);">${p.price} ₺</span> | SIRA: <span style="color:var(--accent);">${p.order || 99}</span></span>
-                        </div>
-                        <div class="admin-actions">
-                            <button class="action-btn ${p.stock ? 'btn-cancel' : 'btn-confirm'}" onclick="toggleStock('${p.id}', ${!p.stock})">${p.stock ? 'TÜKENDİ YAP' : 'SATIŞA AÇ'}</button>
-                            <button class="action-btn btn-blue" onclick="editProduct('${p.id}', '${safeName}', ${p.price}, '${safeDesc}', '${p.cal || ''}', '${p.allergen || ''}', '${p.cat}', ${p.vegan}, ${p.order || 99}, ${p.stock})">DÜZENLE</button>
-                            <button class="action-btn btn-red" onclick="deleteProduct('${p.id}')">SİL</button>
-                        </div>
-                    `;
-                    adminContainer.appendChild(divA);
-                });
-            });
+                </div>
+                <div class="prod-price">${p.price} ₺</div>
+            `;
+            if(p.stock) div.addEventListener('click', () => addItemToOrder(p));
+            container.appendChild(div);
         }
     });
-    globalUnsubscribes.push(unsub);
+
+    if(adminContainer) {
+        Object.keys(productsByCategory).sort((a,b) => {
+            const catA = globalCategoriesList.find(c => c.name === a);
+            const catB = globalCategoriesList.find(c => c.name === b);
+            return getOrderVal(catA ? catA.order : null) - getOrderVal(catB ? catB.order : null);
+        }).forEach(cat => {
+            adminContainer.innerHTML += `<div class="menu-group-title"><span>${cat}</span></div>`;
+            productsByCategory[cat].forEach(p => {
+                const divA = document.createElement('div');
+                divA.className = `admin-list-item`;
+                
+                let attrHtml = '';
+                if(p.desc) attrHtml += `İçerik: ${p.desc} | `;
+                if(p.cal) attrHtml += `Kalori: ${p.cal} | `;
+                if(p.allergen) attrHtml += `Alerjen: ${p.allergen} | `;
+                
+                let safeName = p.name.replace(/'/g, "\\'");
+                let safeDesc = p.desc ? p.desc.replace(/'/g, "\\'") : '';
+                
+                divA.innerHTML = `
+                    <div class="info" style="${!p.stock ? 'opacity:0.5; filter:grayscale(1);' : ''}">
+                        <strong>${p.name} ${!p.stock ? '<span style="color:var(--red); font-size:10px;">(TÜKENDİ)</span>' : ''}</strong>
+                        <div style="font-size:11px; color:var(--gray); margin-bottom:5px;">
+                            ${attrHtml} ${p.vegan ? '<span style="color:var(--green); font-weight:900;">VEGAN</span>' : ''}
+                        </div>
+                        <span style="color:var(--gray); font-size:12px; font-weight:900; letter-spacing:1px;">FİYAT: <span style="color:var(--accent);">${p.price} ₺</span> | SIRA: <span style="color:var(--accent);">${p.order !== "" && p.order !== undefined ? p.order : 'Yok'}</span></span>
+                    </div>
+                    <div class="admin-actions">
+                        <button class="action-btn ${p.stock ? 'btn-cancel' : 'btn-confirm'}" onclick="toggleStock('${p.id}', ${!p.stock})">${p.stock ? 'TÜKENDİ YAP' : 'SATIŞA AÇ'}</button>
+                        <button class="action-btn btn-blue" onclick="editProduct('${p.id}', '${safeName}', ${p.price}, '${safeDesc}', '${p.cal || ''}', '${p.allergen || ''}', '${p.cat}', ${p.vegan}, '${p.order !== undefined ? p.order : ''}', ${p.stock})">DÜZENLE</button>
+                        <button class="action-btn btn-red" onclick="deleteProduct('${p.id}')">SİL</button>
+                    </div>
+                `;
+                adminContainer.appendChild(divA);
+            });
+        });
+    }
 }
 
 window.toggleStock = async (id, state) => { await updateDoc(doc(db, "products", id), { stock: state }); };
@@ -863,6 +889,7 @@ window.deleteProduct = (id) => {
         showModal('BAŞARILI', 'Ürün silindi.', '', null, true);
     });
 };
+
 window.editProduct = (id, name, price, desc, cal, allergen, cat, vegan, order, stock) => {
     editingProductId = id;
     editingProductStock = stock;
@@ -874,7 +901,7 @@ window.editProduct = (id, name, price, desc, cal, allergen, cat, vegan, order, s
     document.getElementById('new-product-allergen').value = allergen !== 'undefined' && allergen !== 'null' ? allergen : '';
     document.getElementById('new-product-category').value = cat;
     document.getElementById('new-product-vegan').checked = vegan === true;
-    document.getElementById('new-product-order').value = order || 99;
+    document.getElementById('new-product-order').value = (order !== 'undefined' && order !== 'null' && order !== '') ? order : '';
     
     document.getElementById('save-product-btn').textContent = "ÜRÜNÜ GÜNCELLE";
     document.getElementById('save-product-btn').className = "btn-green";
@@ -891,12 +918,12 @@ document.getElementById('cancel-edit-btn').addEventListener('click', () => {
     document.getElementById('cancel-edit-btn').style.display = 'none';
     document.querySelectorAll('#product-form input').forEach(i => {
         if(i.type === 'checkbox') i.checked = false;
-        else if(i.id === 'new-product-order') i.value = '99';
-        else i.value = '';
+        else i.value = ''; // Sıra numarası dahil hepsi boşaltılıyor
     });
 });
 
 document.getElementById('save-product-btn').addEventListener('click', async () => {
+    const orderVal = document.getElementById('new-product-order').value;
     const data = {
         name: document.getElementById('new-product-name').value,
         price: Number(document.getElementById('new-product-price').value),
@@ -905,7 +932,7 @@ document.getElementById('save-product-btn').addEventListener('click', async () =
         allergen: document.getElementById('new-product-allergen').value,
         cat: document.getElementById('new-product-category').value,
         vegan: document.getElementById('new-product-vegan').checked,
-        order: parseInt(document.getElementById('new-product-order').value) || 99,
+        order: orderVal !== '' ? parseInt(orderVal) : '',
         stock: editingProductId ? editingProductStock : true
     };
     if(data.name && data.price) {
@@ -1140,7 +1167,6 @@ document.getElementById('item-pay-btn').addEventListener('click', async () => {
         });
     }, 100);
 });
-
 
 document.getElementById('close-table-btn').addEventListener('click', async () => {
     if(!currentOrderDocId) return;
@@ -1638,6 +1664,7 @@ window.deleteExpense = (id) => {
     });
 };
 
+// QR Menüdeki sıraya göre listeleme düzeltildi
 function listenQRCategoriesAndProducts() {
     let globalCats = [];
     let globalProds = [];
@@ -1682,14 +1709,14 @@ function listenQRCategoriesAndProducts() {
 
     const unsubC = onSnapshot(collection(db, "categories"), (snapshot) => {
         globalCats = [...snapshot.docs].map(d => d.data());
-        globalCats.sort((a,b) => (a.order || 99) - (b.order || 99));
+        globalCats.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
         if(typeof window.renderQR === 'function') window.renderQR();
     });
     globalUnsubscribes.push(unsubC);
 
     const unsubP = onSnapshot(collection(db, "products"), (snapshot) => {
         globalProds = [...snapshot.docs].map(d => d.data());
-        globalProds.sort((a,b) => (a.order || 99) - (b.order || 99));
+        globalProds.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
         if(typeof window.renderQR === 'function') window.renderQR();
     });
     globalUnsubscribes.push(unsubP);
