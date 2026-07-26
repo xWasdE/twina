@@ -354,6 +354,12 @@ async function startApp() {
     
     if(currentUser.role === 'admin') { 
         listenStaff(); 
+        listenFinanceAndHistory();
+        
+        const dateInput = document.getElementById('history-date-filter');
+        if(dateInput) {
+            dateInput.value = toYYYYMMDD(new Date()); 
+        }
     }
 }
 
@@ -399,14 +405,6 @@ function switchView(viewName) {
         btn.classList.remove('active');
         if(btn.dataset.target === `${viewName}-view`) btn.classList.add('active');
     });
-
-    if(viewName === 'finance' && currentUser && currentUser.role === 'admin') {
-        const dateInput = document.getElementById('history-date-filter');
-        if(dateInput && globalOrders.length === 0) { 
-            dateInput.value = toYYYYMMDD(new Date()); 
-            loadFinanceForDate(dateInput.value); 
-        }
-    }
 }
 
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -596,7 +594,7 @@ document.getElementById('transfer-table-btn').addEventListener('click', async ()
                 showModal('BAŞARILI', 'Adisyonlar başarıyla birleştirildi.', '', null, true);
             }
         } catch(err) {
-            showModal('HATA', 'Taşıma işlemi başarısız: ' + err.message, '', null, true);
+            showModal('HATA', 'Taşıma işlemi başarısız.', '', null, true);
         }
     });
 });
@@ -1039,9 +1037,7 @@ function renderAdisyon(o) {
 function listenOrderData(orderId) {
     if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
     
-    if (!currentOrderData || currentOrderData.tableId !== currentTableId) {
-        currentOrderData = { items: [], partialPayments: [], paid: 0, total: 0, logs: [] };
-    }
+    currentOrderData = { items: [], partialPayments: [], paid: 0, total: 0, logs: [] };
     renderAdisyon(currentOrderData);
 
     liveOrderUnsubscribe = onSnapshot(doc(db, "orders", orderId), (docSnap) => {
@@ -1054,34 +1050,34 @@ function listenOrderData(orderId) {
 }
 
 window.addItemToOrder = function(product) {
-    if(!currentOrderDocId || !currentOrderData) return;
+    if(!currentOrderDocId) return;
+    if(!currentOrderData) currentOrderData = { items: [], partialPayments: [], paid: 0, total: 0, logs: [] };
     
-    const items = currentOrderData.items ? [...currentOrderData.items] : [];
-    const logs = currentOrderData.logs ? [...currentOrderData.logs] : [];
+    const items = currentOrderData.items || [];
+    const logs = currentOrderData.logs || [];
     let currentTotal = currentOrderData.total || 0;
 
     items.push({ name: product.name, price: product.price, waiter: currentUser.name, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}) });
     logs.push(createLog("ÜRÜN EKLENDİ", `1x ${product.name} eklendi.`));
-    
-    const newTotal = currentTotal + product.price;
+    currentTotal += product.price;
 
     currentOrderData.items = items;
     currentOrderData.logs = logs;
-    currentOrderData.total = newTotal;
-    
+    currentOrderData.total = currentTotal;
+
     renderAdisyon(currentOrderData);
 
     const batch = writeBatch(db);
-    batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: newTotal });
-    batch.update(doc(db, "tables", currentTableId), { totalAmount: newTotal });
+    batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: currentTotal });
+    batch.update(doc(db, "tables", currentTableId), { totalAmount: currentTotal });
     batch.commit().catch(()=>{});
 };
 
 window.deleteOrderItem = function(index) {
     if(!currentOrderDocId || !currentOrderData) return;
     
-    const items = [...(currentOrderData.items || [])];
-    const logs = [...(currentOrderData.logs || [])];
+    const items = currentOrderData.items || [];
+    const logs = currentOrderData.logs || [];
     let currentTotal = currentOrderData.total || 0;
 
     if(items[index] && !items[index].deleted) {
@@ -1109,7 +1105,7 @@ window.addNoteToItem = function(orderId, index, currentNote) {
         <input type="text" id="item-note" value="${currentNote}" placeholder="Notunuz...">
     `, (data) => {
         if(!currentOrderData) return;
-        const items = [...(currentOrderData.items || [])];
+        const items = currentOrderData.items || [];
         if(items[index]) {
             items[index].note = data['item-note'];
             
@@ -1134,8 +1130,8 @@ document.getElementById('partial-pay-btn').addEventListener('click', () => {
         const amt = Number(data['pay-amt']);
         const method = data['pay-method'];
         if(amt > 0) {
-            const pays = [...(currentOrderData.partialPayments || [])];
-            const logs = [...(currentOrderData.logs || [])];
+            const pays = currentOrderData.partialPayments || [];
+            const logs = currentOrderData.logs || [];
             
             const newPaid = (currentOrderData.paid || 0) + amt;
             
@@ -1204,9 +1200,9 @@ document.getElementById('item-pay-btn').addEventListener('click', () => {
         });
 
         if(totalToPay > 0) {
-            const pays = [...(currentOrderData.partialPayments || [])];
-            const logs = [...(currentOrderData.logs || [])];
-            let freshItems = [...(currentOrderData.items || [])];
+            const pays = currentOrderData.partialPayments || [];
+            const logs = currentOrderData.logs || [];
+            let freshItems = currentOrderData.items || [];
             
             selectedIndices.forEach(idx => {
                 freshItems[idx].paid = true;
@@ -1264,8 +1260,8 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
             </select>
         `, (data) => {
             const method = data['pay-method-full'];
-            const pays = [...(d.partialPayments || [])];
-            const logs = [...(d.logs || [])];
+            const pays = d.partialPayments || [];
+            const logs = d.logs || [];
 
             pays.push({ amount: remaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
             logs.push(createLog("HESAP KAPATILDI", `Kalan ${remaining} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
@@ -1286,15 +1282,10 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
             batch.update(doc(db, "orders", oId), { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
             batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
             batch.commit().catch(()=>{});
-
-            const dateInput = document.getElementById('history-date-filter');
-            if (dateInput && dateInput.value) {
-                loadFinanceForDate(dateInput.value);
-            }
         });
     } else {
         showModal('MASAYI KAPAT', 'AÇIK HESAP BULUNMUYOR. MASA BOŞALTILACAKTIR. ONAYLIYOR MUSUNUZ?', '', () => {
-            const logs = [...(d.logs || [])];
+            const logs = d.logs || [];
             logs.push(createLog("MASA KAPATILDI", `Açık hesap olmadan masa boşaltıldı.`));
             
             currentOrderDocId = null;
@@ -1313,11 +1304,6 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
             batch.update(doc(db, "orders", oId), { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
             batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
             batch.commit().catch(()=>{});
-
-            const dateInput = document.getElementById('history-date-filter');
-            if (dateInput && dateInput.value) {
-                loadFinanceForDate(dateInput.value);
-            }
         });
     }
 });
@@ -1530,7 +1516,7 @@ function listenFinanceAndHistory() {
     globalUnsubscribes.push(unsub2);
 }
 
-document.getElementById('history-date-filter').addEventListener('change', () => {
+document.getElementById('history-date-filter')?.addEventListener('change', () => {
     renderFinanceTotals();
     renderFinanceHistoryList();
 });
