@@ -8,6 +8,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <title>TWIN-A</title>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800;900&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="style.css">
     <meta name="theme-color" content="#141210">
 </head>
@@ -57,7 +58,7 @@
     </div>
 
     <div id="qr-menu-app" class="screen" style="display:none; background:var(--bg); color:var(--text); position:relative;">
-        <button id="qr-theme-toggle" class="theme-btn" style="position: absolute; top: max(20px, env(safe-area-inset-top)); right: 20px;">🌓</button>
+        <button id="qr-theme-toggle" class="theme-btn" style="position: absolute; top: max(20px, env(safe-area-inset-top)); right: 20px; z-index: 100;">🌓</button>
         <div class="qr-menu-header">
             <img src="logo.png" alt="TWIN-A" onerror="this.style.display='none'" style="height:40px; margin-bottom:10px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.2));">
             <h1 id="qr-company-name">TWIN-A</h1>
@@ -302,6 +303,15 @@
                             </div>
                         </div>
 
+                        <div class="add-form">
+                            <h3>PERSONELE DUYURU YAYINLA</h3>
+                            <textarea id="broadcast-msg" placeholder="Tüm sistemlerde üstte görünecek mesajı yazın..." rows="3"></textarea>
+                            <button id="send-broadcast-btn" class="btn-blue" style="padding:10px; font-size:10px;">DUYURUYU YAYINLA</button>
+                            <button id="clear-broadcast-btn" class="btn-cancel" style="margin-top:6px; padding:10px; font-size:10px;">DUYURUYU KALDIR</button>
+                        </div>
+                    </div>
+
+                    <div class="flex-col" style="gap:20px; flex:1; min-width:300px;">
                         <div class="add-form">
                             <h3>BAKIM MODU</h3>
                             <div style="background:var(--hover-bg); padding:15px; border-radius:6px; border:1px solid var(--border);">
