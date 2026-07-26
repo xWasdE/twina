@@ -162,16 +162,8 @@ nav::-webkit-scrollbar { display: none; }
 .action-buttons-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
 .adisyon-footer button { width: 100%; font-size: 10px; border-radius: 4px; letter-spacing: 1px; padding: 10px; }
 
-/* Genel Admin Panel Düzeni */
 .admin-panel-layout { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; width: 100%; }
-
-/* Ayarlar sayfası için özel simetrik ızgara (Grid) düzeltmesi */
-#settings-view .admin-panel-layout {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 20px;
-    align-items: start;
-}
+#settings-view .admin-panel-layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; align-items: start; }
 
 .add-form { background: var(--card-bg); padding: 20px; border-radius: 6px; box-shadow: 0 6px 15px rgba(0,0,0,0.04); display: flex; flex-direction: column; gap: 10px; border-top: 4px solid var(--accent); border-left: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .add-form h3 { font-size: 12px; font-weight: 900; letter-spacing: 1px; border-bottom: 1px solid var(--border); padding-bottom: 8px; color: var(--text); font-family: var(--font-head); margin:0; }
