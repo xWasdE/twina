@@ -17,27 +17,25 @@ let currentUser = null;
 let currentTableId = null;
 let currentOrderDocId = null;
 let currentCategory = '';
-let companyInfo = { name: "TWIN-A", phone: "", address: "", open: "", close: "", broadcast: "", maintenance: false };
+let companyInfo = { name: "TWIN-A", phone: "", address: "", open: "", close: "", broadcast: "", maintenance: false, menuVersion: "1" };
 let editingProductId = null;
 let editingProductStock = true;
 let isMaintenanceEnforced = false;
 let globalUnsubscribes = [];
 let timeUpdaterInterval = null;
-
-let liveOrderUnsubscribe = null; 
+let liveOrderUnsubscribe = null;
 
 let globalOrders = [];
 let globalExpenses = [];
 let chartInstances = {};
 let globalCategoriesList = [];
-let globalProductsList = [];
+let globalProductsList = []; 
 
 const getOrderVal = (val) => (val === "" || val === null || val === undefined) ? 999 : Number(val);
 
 const urlParams = new URLSearchParams(window.location.search);
 const isQRMode = urlParams.get('qr') === '1';
 const expectedHash = window.location.hash || '';
-
 
 const maintBtn = document.getElementById('maintenance-admin-login-btn');
 if (maintBtn) maintBtn.textContent = "ANA SAYFAYA DÖN";
@@ -256,6 +254,16 @@ function applyGlobalSettings() {
             window.location.reload(); 
         }
     }
+
+    const localVersion = localStorage.getItem('twinA_menu_version');
+    const remoteVersion = companyInfo.menuVersion || '1';
+    if(localVersion !== remoteVersion) {
+        if(isQRMode) {
+            loadQRCategoriesAndProducts();
+        } else if (currentUser) {
+            fetchMenuData(); 
+        }
+    }
 }
 
 if(document.getElementById('maintenance-admin-login-btn')) {
@@ -339,7 +347,6 @@ function startApp() {
         document.getElementById('staff-nav').style.display = 'flex';
     }
 
-    
     getDocs(collection(db, "tables")).then(snap => {
         if (snap.empty) {
             for (let i = 1; i <= 28; i++) {
@@ -350,7 +357,7 @@ function startApp() {
 
     switchView('tables');
     listenTables();
-    listenCategories(); 
+    loadMenuSmart();
     
     if(currentUser.role === 'admin') { 
         listenStaff(); 
@@ -669,14 +676,42 @@ document.getElementById('back-to-tables').addEventListener('click', () => {
     switchView('tables');
 });
 
-function listenCategories() {
-    if(window.unsubCats) window.unsubCats();
-    window.unsubCats = onSnapshot(collection(db, "categories"), (snapshot) => {
-        globalCategoriesList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+async function bumpMenuVersion() {
+    await updateDoc(doc(db, "settings", "global"), { menuVersion: Date.now().toString() });
+}
+
+async function fetchMenuData() {
+    const [catSnap, prodSnap] = await Promise.all([
+        getDocs(collection(db, "categories")),
+        getDocs(collection(db, "products"))
+    ]);
+    
+    globalCategoriesList = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+    
+    globalProductsList = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    
+    localStorage.setItem('twinA_menu', JSON.stringify({ cats: globalCategoriesList, prods: globalProductsList }));
+    localStorage.setItem('twinA_menu_version', companyInfo.menuVersion || '1');
+    
+    renderCategoriesUI();
+    renderProductsUI();
+}
+
+function loadMenuSmart() {
+    const localMenu = localStorage.getItem('twinA_menu');
+    const localVersion = localStorage.getItem('twinA_menu_version');
+    const remoteVersion = companyInfo.menuVersion || '1';
+
+    if (localMenu && localVersion === remoteVersion) {
+        const parsed = JSON.parse(localMenu);
+        globalCategoriesList = parsed.cats;
+        globalProductsList = parsed.prods;
         renderCategoriesUI();
-    });
-    globalUnsubscribes.push(window.unsubCats);
+        renderProductsUI();
+    } else {
+        fetchMenuData();
+    }
 }
 
 function renderCategoriesUI() {
@@ -725,9 +760,6 @@ function renderCategoriesUI() {
     if(editCatSelect && selectedCatId) {
         editCatSelect.value = selectedCatId;
     }
-    
-    if(!window.unsubProds) listenProducts();
-    else renderProductsUI();
 }
 
 document.getElementById('add-category-btn').addEventListener('click', async () => {
@@ -737,6 +769,7 @@ document.getElementById('add-category-btn').addEventListener('click', async () =
     
     if(name) {
         await addDoc(collection(db, "categories"), { name: name, order: order });
+        await bumpMenuVersion();
         document.getElementById('cat-name').value = '';
         document.getElementById('cat-order').value = '';
         showModal('BAŞARILI', 'Kategori eklendi.', '', null, true);
@@ -782,6 +815,7 @@ document.getElementById('update-cat-btn').addEventListener('click', async () => 
         await Promise.all(updatePromises);
     }
     
+    await bumpMenuVersion();
     document.getElementById('edit-cat-select').value = '';
     document.getElementById('edit-cat-name').value = '';
     document.getElementById('edit-cat-order').value = '';
@@ -796,21 +830,13 @@ document.getElementById('delete-cat-btn').addEventListener('click', () => {
     }
     showModal('KATEGORİ SİL', 'Bu kategoriyi silerseniz içindeki ürünler MENÜDE GÖRÜNMEZ. Emin misiniz?', '', async () => {
         await deleteDoc(doc(db, "categories", catId));
+        await bumpMenuVersion();
         document.getElementById('edit-cat-select').value = '';
         document.getElementById('edit-cat-name').value = '';
         document.getElementById('edit-cat-order').value = '';
         showModal('BAŞARILI', 'Kategori silindi.', '', null, true);
     });
 });
-
-function listenProducts() {
-    if(window.unsubProds) window.unsubProds();
-    window.unsubProds = onSnapshot(collection(db, "products"), (snapshot) => {
-        globalProductsList = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
-        renderProductsUI();
-    });
-    globalUnsubscribes.push(window.unsubProds);
-}
 
 function renderProductsUI() {
     const container = document.getElementById('products-container');
@@ -884,10 +910,14 @@ function renderProductsUI() {
     }
 }
 
-window.toggleStock = async (id, state) => { await updateDoc(doc(db, "products", id), { stock: state }); };
+window.toggleStock = async (id, state) => { 
+    await updateDoc(doc(db, "products", id), { stock: state }); 
+    await bumpMenuVersion();
+};
 window.deleteProduct = (id) => {
     showModal('ÜRÜNÜ SİL', 'BU ÜRÜNÜ SİLMEK İSTEDİĞİNİZE EMİN MİSİNİZ?', '', async () => { 
         await deleteDoc(doc(db, "products", id)); 
+        await bumpMenuVersion();
         showModal('BAŞARILI', 'Ürün silindi.', '', null, true);
     });
 };
@@ -940,9 +970,11 @@ document.getElementById('save-product-btn').addEventListener('click', async () =
     if(data.name && data.price) {
         if(editingProductId) {
             await updateDoc(doc(db, "products", editingProductId), data);
+            await bumpMenuVersion();
             showModal('BAŞARILI', 'Ürün güncellendi.', '', null, true);
         } else {
             await addDoc(collection(db, "products"), data);
+            await bumpMenuVersion();
             showModal('BAŞARILI', 'Ürün eklendi.', '', null, true);
         }
         document.getElementById('cancel-edit-btn').click();
@@ -1001,12 +1033,6 @@ function listenOrderData(orderId) {
 
         document.getElementById('adisyon-subtotal').textContent = `${currentTotal} ₺`;
         document.getElementById('adisyon-total').textContent = `${currentTotal - totalPaid} ₺`;
-        
-        if(o.total !== currentTotal) {
-            updateDoc(doc(db, "orders", orderId), { total: currentTotal }).then(()=>{
-                if(currentTableId) updateDoc(doc(db, "tables", currentTableId), { totalAmount: currentTotal });
-            });
-        }
     });
 }
 
@@ -1014,13 +1040,19 @@ async function addItemToOrder(product) {
     if(!currentOrderDocId) return;
     const orderRef = doc(db, "orders", currentOrderDocId);
     const snap = await getDoc(orderRef);
-    const items = snap.data().items || [];
-    const logs = snap.data().logs || [];
+    const data = snap.data();
+    const items = data.items || [];
+    const logs = data.logs || [];
     
     items.push({ name: product.name, price: product.price, waiter: currentUser.name, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}) });
     logs.push(createLog("ÜRÜN EKLENDİ", `1x ${product.name} eklendi.`));
     
-    await updateDoc(orderRef, { items: items, logs: logs });
+    const newTotal = (data.total || 0) + product.price;
+    
+    await Promise.all([
+        updateDoc(orderRef, { items: items, logs: logs, total: newTotal }),
+        updateDoc(doc(db, "tables", currentTableId), { totalAmount: newTotal })
+    ]);
 }
 
 window.deleteOrderItem = async (index) => {
@@ -1034,8 +1066,15 @@ window.deleteOrderItem = async (index) => {
     if(items[index] && !items[index].deleted) {
         items[index].deleted = true;
         items[index].deletedBy = currentUser.name;
+        
+        const newTotal = (data.total || 0) - items[index].price;
+        
         logs.push(createLog("ÜRÜN İPTALİ", `1x ${items[index].name} listeden çıkarıldı.`));
-        await updateDoc(orderRef, { items: items, logs: logs });
+        
+        await Promise.all([
+            updateDoc(orderRef, { items: items, logs: logs, total: newTotal }),
+            updateDoc(doc(db, "tables", currentTableId), { totalAmount: newTotal })
+        ]);
     }
 };
 
@@ -1196,6 +1235,12 @@ document.getElementById('close-table-btn').addEventListener('click', async () =>
             currentOrderDocId = null;
             if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
             switchView('tables');
+            
+            const dateInput = document.getElementById('history-date-filter');
+            if (dateInput && dateInput.value) {
+                loadFinanceForDate(dateInput.value);
+            }
+            
             showModal('BAŞARILI', 'Hesap tahsil edildi ve masa kapatıldı.', '', null, true);
         });
     } else {
@@ -1207,6 +1252,12 @@ document.getElementById('close-table-btn').addEventListener('click', async () =>
             currentOrderDocId = null;
             if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
             switchView('tables');
+            
+            const dateInput = document.getElementById('history-date-filter');
+            if (dateInput && dateInput.value) {
+                loadFinanceForDate(dateInput.value);
+            }
+            
             showModal('BAŞARILI', 'Masa boşaltıldı.', '', null, true);
         });
     }
@@ -1259,7 +1310,6 @@ document.getElementById('print-order-btn').addEventListener('click', async () =>
     pf.innerHTML = html;
     window.print();
 });
-
 
 function listenStaff() {
     const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
@@ -1387,6 +1437,11 @@ document.getElementById('send-broadcast-btn').addEventListener('click', async ()
 document.getElementById('clear-broadcast-btn').addEventListener('click', async () => {
     document.getElementById('broadcast-msg').value = '';
     await updateDoc(doc(db, "settings", "global"), { broadcast: "" });
+});
+
+document.getElementById('force-menu-update-btn')?.addEventListener('click', async () => {
+    await bumpMenuVersion();
+    showModal('BAŞARILI', 'Menü tüm cihazlar (Garsonlar ve QR) için güncellendi.', '', null, true);
 });
 
 document.getElementById('history-date-filter').addEventListener('change', (e) => {
@@ -1734,37 +1789,35 @@ async function loadQRCategoriesAndProducts() {
         });
     };
 
-    const cachedCats = sessionStorage.getItem('twinA_qr_cats');
-    const cachedProds = sessionStorage.getItem('twinA_qr_prods');
-    const cacheTime = sessionStorage.getItem('twinA_qr_time');
-    const now = new Date().getTime();
+    const localMenu = localStorage.getItem('twinA_menu');
+    const localVersion = localStorage.getItem('twinA_menu_version');
+    const remoteVersion = companyInfo.menuVersion || '1';
 
-    if (cachedCats && cachedProds && cacheTime && (now - parseInt(cacheTime) < 900000)) {
-        globalCats = JSON.parse(cachedCats);
-        globalProds = JSON.parse(cachedProds);
+    if (localMenu && localVersion === remoteVersion) {
+        const parsed = JSON.parse(localMenu);
+        globalCats = parsed.cats;
+        globalProds = parsed.prods;
         window.renderQR();
-        return;
-    }
-
-    try {
-        const [catSnap, prodSnap] = await Promise.all([
-            getDocs(collection(db, "categories")),
-            getDocs(collection(db, "products"))
-        ]);
-
-        globalCats = catSnap.docs.map(d => d.data());
-        globalCats.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-
-        globalProds = prodSnap.docs.map(d => d.data());
-        globalProds.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-
-        sessionStorage.setItem('twinA_qr_cats', JSON.stringify(globalCats));
-        sessionStorage.setItem('twinA_qr_prods', JSON.stringify(globalProds));
-        sessionStorage.setItem('twinA_qr_time', now.toString());
-
-        window.renderQR();
-    } catch(e) {
-        console.error("QR Menü yüklenemedi:", e);
+    } else {
+        try {
+            const [catSnap, prodSnap] = await Promise.all([
+                getDocs(collection(db, "categories")),
+                getDocs(collection(db, "products"))
+            ]);
+            
+            globalCats = catSnap.docs.map(d => d.data());
+            globalCats.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+            
+            globalProds = prodSnap.docs.map(d => d.data());
+            globalProds.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+            
+            localStorage.setItem('twinA_menu', JSON.stringify({ cats: globalCats, prods: globalProds }));
+            localStorage.setItem('twinA_menu_version', remoteVersion);
+            
+            window.renderQR();
+        } catch(e) {
+            console.error(e);
+        }
     }
 }
 
