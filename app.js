@@ -690,6 +690,7 @@ async function fetchMenuData() {
     globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
     
     globalProductsList = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    globalProductsList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
     
     localStorage.setItem('twinA_menu', JSON.stringify({ cats: globalCategoriesList, prods: globalProductsList }));
     localStorage.setItem('twinA_menu_version', companyInfo.menuVersion || '1');
@@ -769,7 +770,6 @@ document.getElementById('add-category-btn').addEventListener('click', async () =
     
     if(name) {
         await addDoc(collection(db, "categories"), { name: name, order: order });
-        await bumpMenuVersion();
         document.getElementById('cat-name').value = '';
         document.getElementById('cat-order').value = '';
         showModal('BAŞARILI', 'Kategori eklendi.', '', null, true);
@@ -815,7 +815,6 @@ document.getElementById('update-cat-btn').addEventListener('click', async () => 
         await Promise.all(updatePromises);
     }
     
-    await bumpMenuVersion();
     document.getElementById('edit-cat-select').value = '';
     document.getElementById('edit-cat-name').value = '';
     document.getElementById('edit-cat-order').value = '';
@@ -830,7 +829,6 @@ document.getElementById('delete-cat-btn').addEventListener('click', () => {
     }
     showModal('KATEGORİ SİL', 'Bu kategoriyi silerseniz içindeki ürünler MENÜDE GÖRÜNMEZ. Emin misiniz?', '', async () => {
         await deleteDoc(doc(db, "categories", catId));
-        await bumpMenuVersion();
         document.getElementById('edit-cat-select').value = '';
         document.getElementById('edit-cat-name').value = '';
         document.getElementById('edit-cat-order').value = '';
@@ -912,12 +910,10 @@ function renderProductsUI() {
 
 window.toggleStock = async (id, state) => { 
     await updateDoc(doc(db, "products", id), { stock: state }); 
-    await bumpMenuVersion();
 };
 window.deleteProduct = (id) => {
     showModal('ÜRÜNÜ SİL', 'BU ÜRÜNÜ SİLMEK İSTEDİĞİNİZE EMİN MİSİNİZ?', '', async () => { 
         await deleteDoc(doc(db, "products", id)); 
-        await bumpMenuVersion();
         showModal('BAŞARILI', 'Ürün silindi.', '', null, true);
     });
 };
@@ -970,11 +966,9 @@ document.getElementById('save-product-btn').addEventListener('click', async () =
     if(data.name && data.price) {
         if(editingProductId) {
             await updateDoc(doc(db, "products", editingProductId), data);
-            await bumpMenuVersion();
             showModal('BAŞARILI', 'Ürün güncellendi.', '', null, true);
         } else {
             await addDoc(collection(db, "products"), data);
-            await bumpMenuVersion();
             showModal('BAŞARILI', 'Ürün eklendi.', '', null, true);
         }
         document.getElementById('cancel-edit-btn').click();
