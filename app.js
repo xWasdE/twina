@@ -180,7 +180,7 @@ async function bootSystem() {
         const qrScreen = document.getElementById('qr-menu-app');
         qrScreen.style.display = 'flex';
         qrScreen.classList.add('active');
-        loadQRCategoriesAndProducts(); // Müşteri okuma optimizasyonu
+        loadQRCategoriesAndProducts();
         return;
     }
 
@@ -205,7 +205,7 @@ async function bootSystem() {
     loginScreen.classList.add('active');
 }
 
-// iOS PWA Bug Çözümü: Ghost layer kalmaması için pointer-events ve innerHTML temizliği eklendi
+
 function applyGlobalSettings() {
     document.getElementById('header-company-name').textContent = companyInfo.name || 'TWIN-A';
     document.getElementById('company-name').value = companyInfo.name || '';
@@ -348,11 +348,11 @@ async function startApp() {
     if(currentUser.role === 'admin') { 
         listenStaff(); 
         
-        // Yeni Kasa ve Geçmiş Mantığı (Tasarruf Modu)
+        
         const dateInput = document.getElementById('history-date-filter');
         if(dateInput) {
             dateInput.value = toYYYYMMDD(new Date()); 
-            loadFinanceForDate(dateInput.value); // Sadece ilk açılışta bugünün verilerini çek
+            loadFinanceForDate(dateInput.value);
         }
         
         const sDate = document.getElementById('dash-start-date');
@@ -659,7 +659,7 @@ function openOrderView(tableName, orderId) {
 
 document.getElementById('back-to-tables').addEventListener('click', () => {
     currentOrderDocId = null;
-    if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; } // Adisyondan çıkınca dinlemeyi bırakır
+    if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
     switchView('tables');
 });
 
@@ -1372,8 +1372,7 @@ document.getElementById('clear-broadcast-btn').addEventListener('click', async (
     await updateDoc(doc(db, "settings", "global"), { broadcast: "" });
 });
 
-// OPTİMİZASYON: Tüm geçmiş siparişlerin dinlenmesi (onSnapshot) iptal edildi. 
-// Sadece seçili tarih için getDocs ile tek seferlik okuma yapılacak.
+
 document.getElementById('history-date-filter').addEventListener('change', (e) => {
     loadFinanceForDate(e.target.value);
 });
@@ -1385,13 +1384,13 @@ async function loadFinanceForDate(dateStr) {
     const startD = new Date(`${y}-${m}-${d}T00:00:00`);
     const endD = new Date(`${y}-${m}-${d}T23:59:59.999`);
 
-    // Sadece o gün kapatılan siparişleri getir
+    
     const qOrders = query(collection(db, "orders"), 
         where("closedAt", ">=", startD.toISOString()),
         where("closedAt", "<=", endD.toISOString())
     );
 
-    // Sadece o gün eklenen masrafları getir
+    
     const qExpenses = query(collection(db, "expenses"), 
         where("time", ">=", startD.toISOString()),
         where("time", "<=", endD.toISOString())
@@ -1663,7 +1662,7 @@ document.getElementById('save-expense-btn').addEventListener('click', async () =
             await addDoc(collection(db, "expenses"), { amount: amt, desc: desc, user: currentUser ? currentUser.name : 'Bilinmeyen', time: new Date().toISOString() });
             document.getElementById('expense-amount').value = ''; document.getElementById('expense-desc').value = '';
             
-            // Masraf eklendikten sonra o günün kâğıdını güncelle
+            
             const dateInput = document.getElementById('history-date-filter');
             if(dateInput) loadFinanceForDate(dateInput.value);
         }
@@ -1680,8 +1679,7 @@ window.deleteExpense = (id) => {
     });
 };
 
-// OPTİMİZASYON: Müşteri tarafındaki onSnapshot (dinleme) yükü %99 oranında azaltıldı.
-// Artık menü 15 dakika boyunca telefonun hafızasından (SessionStorage) yüklenecek.
+
 async function loadQRCategoriesAndProducts() {
     let globalCats = [];
     let globalProds = [];
@@ -1729,7 +1727,7 @@ async function loadQRCategoriesAndProducts() {
     const cacheTime = sessionStorage.getItem('twinA_qr_time');
     const now = new Date().getTime();
 
-    // Cache kontrolü (15 Dakika = 900.000 ms)
+    
     if (cachedCats && cachedProds && cacheTime && (now - parseInt(cacheTime) < 900000)) {
         globalCats = JSON.parse(cachedCats);
         globalProds = JSON.parse(cachedProds);
@@ -1737,7 +1735,7 @@ async function loadQRCategoriesAndProducts() {
         return;
     }
 
-    // Cache yoksa veya süresi dolduysa Firebase'den TEK SEFERLİK (getDocs) çek (Okuma tasarrufu)
+    
     try {
         const [catSnap, prodSnap] = await Promise.all([
             getDocs(collection(db, "categories")),
@@ -1808,7 +1806,7 @@ function applyDashboardRange(val) {
     updateDashboardData(toYYYYMMDD(start), toYYYYMMDD(end));
 }
 
-// OPTİMİZASYON: Dashboard için sadece seçili tarihler arası tek seferlik (getDocs) sorgu atıldı.
+
 async function updateDashboardData(startDateStr, endDateStr) {
     const dashTotalOrders = document.getElementById('dash-total-orders');
     const dashTotalRev = document.getElementById('dash-total-revenue');
