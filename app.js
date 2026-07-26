@@ -24,11 +24,13 @@ let isMaintenanceEnforced = false;
 let globalUnsubscribes = [];
 let timeUpdaterInterval = null;
 
+let liveOrderUnsubscribe = null;
+
 let globalOrders = [];
 let globalExpenses = [];
 let chartInstances = {};
 let globalCategoriesList = [];
-let globalProductsList = []; 
+let globalProductsList = [];
 
 const getOrderVal = (val) => (val === "" || val === null || val === undefined) ? 999 : Number(val);
 
