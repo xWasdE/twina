@@ -16,7 +16,7 @@ const db = getFirestore(app);
 let currentUser = null;
 let currentTableId = null;
 let currentOrderDocId = null;
-let currentOrderData = null;
+let currentOrderData = null; // Arayüzü anında güncellemek için bellek verisi
 let currentCategory = '';
 let companyInfo = { name: "TWIN-A", phone: "", address: "", open: "", close: "", broadcast: "", maintenance: false, menuVersion: "1" };
 let editingProductId = null;
@@ -176,7 +176,7 @@ async function bootSystem() {
             await setDoc(doc(db, "settings", "global"), companyInfo);
         }
     } catch(e) {
-        console.error(e);
+        console.error("Ayar yükleme hatası:", e);
     }
 
     if (isQRMode) {
@@ -200,7 +200,7 @@ async function bootSystem() {
                     return;
                 }
             }
-        } catch(e) { console.error(e); }
+        } catch(e) { console.error("Oturum kontrol hatası:", e); }
     }
     
     hideAllScreens();
@@ -673,6 +673,7 @@ async function createNewOrder(tableName) {
             createdAt: ts, creator: currentUser.name, logs: [createLog("Masa Açıldı", `${tableName} siparişe açıldı.`)]
         };
 
+        // Değerler anında belleğe işlenerek hayalet ürün/kilitlenme sorunu önlendi
         currentOrderData = newOrderData;
         currentOrderDocId = orderId;
         currentTableId = tableName;
@@ -685,7 +686,7 @@ async function createNewOrder(tableName) {
 
         await batch.commit();
     } catch(err) {
-        showModal('HATA', 'Masa açılamadı.', '', null, true);
+        showModal('HATA', 'Masa açılamadı: ' + err.message, '', null, true);
     }
 }
 
@@ -1052,6 +1053,9 @@ function renderAdisyon(o) {
 function listenOrderData(orderId) {
     if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
     liveOrderUnsubscribe = onSnapshot(doc(db, "orders", orderId), (docSnap) => {
+        // Hayalet Veri Kilidi: Eğer Geri Dön tuşuna basılıp başka masaya geçildiyse, gecikmeli gelen veriyi ENGELLER.
+        if (currentOrderDocId !== orderId) return; 
+        
         if(docSnap.exists()) {
             currentOrderData = docSnap.data();
             renderAdisyon(currentOrderData);
@@ -1059,71 +1063,98 @@ function listenOrderData(orderId) {
     });
 }
 
-window.addItemToOrder = function(product) {
+window.addItemToOrder = async function(product) {
     if(!currentOrderDocId) return;
     
-    if(!currentOrderData) {
-        currentOrderData = { items: [], logs: [], partialPayments: [], paid: 0, total: 0 };
-    }
+    let items = [];
+    let logs = [];
+    let currentTotal = 0;
 
-    const items = currentOrderData.items || [];
-    const logs = currentOrderData.logs || [];
-    let currentTotal = currentOrderData.total || 0;
+    if (currentOrderData) {
+        items = [...(currentOrderData.items || [])];
+        logs = [...(currentOrderData.logs || [])];
+        currentTotal = currentOrderData.total || 0;
+    } else {
+        try {
+            const snap = await getDoc(doc(db, "orders", currentOrderDocId));
+            if(snap.exists()) {
+                const d = snap.data();
+                items = d.items || [];
+                logs = d.logs || [];
+                currentTotal = d.total || 0;
+            }
+        } catch(e) {}
+    }
 
     items.push({ name: product.name, price: product.price, waiter: currentUser.name, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}) });
     logs.push(createLog("ÜRÜN EKLENDİ", `1x ${product.name} eklendi.`));
-    currentTotal += product.price;
+    const newTotal = currentTotal + product.price;
 
-    currentOrderData.items = items;
-    currentOrderData.logs = logs;
-    currentOrderData.total = currentTotal;
-
+    // Optimistic UI - Sunucuyu beklemeden menüyü şimşek hızında günceller
+    currentOrderData = { ...currentOrderData, items: items, logs: logs, total: newTotal };
     renderAdisyon(currentOrderData);
 
-    const batch = writeBatch(db);
-    batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: currentTotal });
-    batch.update(doc(db, "tables", currentTableId), { totalAmount: currentTotal });
-    batch.commit().catch(() => {});
+    try {
+        const batch = writeBatch(db);
+        batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: newTotal });
+        batch.update(doc(db, "tables", currentTableId), { totalAmount: newTotal });
+        await batch.commit();
+    } catch(err) {
+        showModal('HATA', 'Ağa bağlanılamadı. Sipariş gönderilemedi.', '', null, true);
+    }
 };
 
-window.deleteOrderItem = function(index) {
-    if(!currentOrderDocId || !currentOrderData) return;
+window.deleteOrderItem = async function(index) {
+    if(!currentOrderDocId) return;
     
-    const items = currentOrderData.items || [];
-    const logs = currentOrderData.logs || [];
-    let currentTotal = currentOrderData.total || 0;
+    let items = [];
+    let logs = [];
+    let currentTotal = 0;
+
+    if (currentOrderData) {
+        items = [...(currentOrderData.items || [])];
+        logs = [...(currentOrderData.logs || [])];
+        currentTotal = currentOrderData.total || 0;
+    }
 
     if(items[index] && !items[index].deleted) {
         items[index].deleted = true;
         items[index].deletedBy = currentUser.name;
         
-        currentTotal -= items[index].price;
+        const newTotal = currentTotal - items[index].price;
         logs.push(createLog("ÜRÜN İPTALİ", `1x ${items[index].name} listeden çıkarıldı.`));
         
-        currentOrderData.items = items;
-        currentOrderData.logs = logs;
-        currentOrderData.total = currentTotal;
-        
+        currentOrderData = { ...currentOrderData, items: items, logs: logs, total: newTotal };
         renderAdisyon(currentOrderData);
 
-        const batch = writeBatch(db);
-        batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: currentTotal });
-        batch.update(doc(db, "tables", currentTableId), { totalAmount: currentTotal });
-        batch.commit().catch(() => {});
+        try {
+            const batch = writeBatch(db);
+            batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: newTotal });
+            batch.update(doc(db, "tables", currentTableId), { totalAmount: newTotal });
+            await batch.commit();
+        } catch(err) {
+            showModal('HATA', 'Ürün iptal edilemedi.', '', null, true);
+        }
     }
 };
 
 window.addNoteToItem = function(orderId, index, currentNote) {
     showModal('ÜRÜNE NOT EKLE', 'Siparişe özel not giriniz (Örn: Şekersiz, Ketçapsız vb.):', `
         <input type="text" id="item-note" value="${currentNote}" placeholder="Notunuz...">
-    `, (data) => {
+    `, async (data) => {
         if(!currentOrderData) return;
-        const items = currentOrderData.items || [];
+        const items = [...(currentOrderData.items || [])];
         if(items[index]) {
             items[index].note = data['item-note'];
-            currentOrderData.items = items;
+            
+            currentOrderData = { ...currentOrderData, items: items };
             renderAdisyon(currentOrderData);
-            updateDoc(doc(db, "orders", orderId), { items: items }).catch(() => {});
+            
+            try {
+                await updateDoc(doc(db, "orders", orderId), { items: items });
+            } catch(e) {
+                showModal('HATA', 'Not eklenemedi.', '', null, true);
+            }
         }
     });
 };
@@ -1137,30 +1168,30 @@ document.getElementById('partial-pay-btn').addEventListener('click', () => {
             <option value="Kredi Kartı">Kredi Kartı</option>
             <option value="Yemek Kartı">Yemek Kartı</option>
         </select>
-    `, (data) => {
+    `, async (data) => {
         const amt = Number(data['pay-amt']);
         const method = data['pay-method'];
         if(amt > 0) {
-            const d = currentOrderData;
-            const pays = d.partialPayments || [];
-            const logs = d.logs || [];
+            const pays = [...(currentOrderData.partialPayments || [])];
+            const logs = [...(currentOrderData.logs || [])];
             
-            const newPaid = (d.paid || 0) + amt;
+            const newPaid = (currentOrderData.paid || 0) + amt;
             
             pays.push({ amount: amt, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
             logs.push(createLog("ÖDEME ALINDI", `${method} ile tahsilat yapıldı: ${amt} ₺`));
             
-            d.paid = newPaid;
-            d.partialPayments = pays;
-            d.logs = logs;
-            renderAdisyon(d);
+            currentOrderData = { ...currentOrderData, paid: newPaid, partialPayments: pays, logs: logs };
+            renderAdisyon(currentOrderData);
 
-            const batch = writeBatch(db);
-            batch.update(doc(db, "orders", currentOrderDocId), { partialPayments: pays, paid: newPaid, logs: logs });
-            batch.update(doc(db, "tables", currentTableId), { paidAmount: newPaid });
-            batch.commit().catch(() => {});
-            
-            showModal('BAŞARILI', 'Kısmi ödeme kaydedildi.', '', null, true);
+            try {
+                const batch = writeBatch(db);
+                batch.update(doc(db, "orders", currentOrderDocId), { partialPayments: pays, paid: newPaid, logs: logs });
+                batch.update(doc(db, "tables", currentTableId), { paidAmount: newPaid });
+                await batch.commit();
+                showModal('BAŞARILI', 'Kısmi ödeme kaydedildi.', '', null, true);
+            } catch(e) {
+                showModal('HATA', 'Ödeme alınamadı.', '', null, true);
+            }
         }
     });
 });
@@ -1168,9 +1199,7 @@ document.getElementById('partial-pay-btn').addEventListener('click', () => {
 document.getElementById('item-pay-btn').addEventListener('click', () => {
     if(!currentOrderDocId || !currentOrderData) return;
     
-    const o = currentOrderData;
-    const items = o.items || [];
-    
+    const items = currentOrderData.items || [];
     let checklistHtml = '<div id="item-pay-list" style="max-height:180px; overflow-y:auto; text-align:left; margin-bottom:15px; border:1px solid var(--border); padding:10px; border-radius:6px;">';
     let hasUnpaid = false;
     
@@ -1201,7 +1230,7 @@ document.getElementById('item-pay-btn').addEventListener('click', () => {
         </select>
     `;
 
-    showModal('ÜRÜN BAZLI ÖDEME', 'Ödenecek ürünleri seçiniz:', checklistHtml, (data) => {
+    showModal('ÜRÜN BAZLI ÖDEME', 'Ödenecek ürünleri seçiniz:', checklistHtml, async (data) => {
         const method = data['item-pay-method'];
         let totalToPay = 0;
         let selectedIndices = [];
@@ -1214,32 +1243,31 @@ document.getElementById('item-pay-btn').addEventListener('click', () => {
         });
 
         if(totalToPay > 0) {
-            const d = currentOrderData;
-            const pays = d.partialPayments || [];
-            const logs = d.logs || [];
-            let freshItems = d.items || [];
+            const pays = [...(currentOrderData.partialPayments || [])];
+            const logs = [...(currentOrderData.logs || [])];
+            let freshItems = [...(currentOrderData.items || [])];
             
             selectedIndices.forEach(idx => {
                 freshItems[idx].paid = true;
             });
             
-            const newPaid = (d.paid || 0) + totalToPay;
+            const newPaid = (currentOrderData.paid || 0) + totalToPay;
             
             pays.push({ amount: totalToPay, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
             logs.push(createLog("ÜRÜN BAZLI ÖDEME", `${method} ile tahsil edildi: ${totalToPay} ₺ (${itemNames.join(', ')})`));
             
-            d.paid = newPaid;
-            d.items = freshItems;
-            d.partialPayments = pays;
-            d.logs = logs;
-            renderAdisyon(d);
+            currentOrderData = { ...currentOrderData, items: freshItems, paid: newPaid, partialPayments: pays, logs: logs };
+            renderAdisyon(currentOrderData);
 
-            const batch = writeBatch(db);
-            batch.update(doc(db, "orders", currentOrderDocId), { items: freshItems, partialPayments: pays, paid: newPaid, logs: logs });
-            batch.update(doc(db, "tables", currentTableId), { paidAmount: newPaid });
-            batch.commit().catch(() => {});
-            
-            showModal('BAŞARILI', 'Seçilen ürünlerin ödemesi alındı.', '', null, true);
+            try {
+                const batch = writeBatch(db);
+                batch.update(doc(db, "orders", currentOrderDocId), { items: freshItems, partialPayments: pays, paid: newPaid, logs: logs });
+                batch.update(doc(db, "tables", currentTableId), { paidAmount: newPaid });
+                await batch.commit();
+                showModal('BAŞARILI', 'Seçilen ürünlerin ödemesi alındı.', '', null, true);
+            } catch(e) {
+                showModal('HATA', 'Ödeme başarısız.', '', null, true);
+            }
         }
     });
 
@@ -1258,7 +1286,7 @@ document.getElementById('item-pay-btn').addEventListener('click', () => {
     }, 100);
 });
 
-document.getElementById('close-table-btn').addEventListener('click', () => {
+document.getElementById('close-table-btn').addEventListener('click', async () => {
     if(!currentOrderDocId || !currentOrderData) return;
     
     const oId = currentOrderDocId;
@@ -1273,40 +1301,58 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
                 <option value="Kredi Kartı">Kredi Kartı</option>
                 <option value="Yemek Kartı">Yemek Kartı</option>
             </select>
-        `, (data) => {
-            const method = data['pay-method-full'];
-            const pays = d.partialPayments || [];
-            const logs = d.logs || [];
+        `, async (data) => {
+            try {
+                const method = data['pay-method-full'];
+                const pays = [...(d.partialPayments || [])];
+                const logs = [...(d.logs || [])];
 
-            pays.push({ amount: remaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
-            logs.push(createLog("HESAP KAPATILDI", `Kalan ${remaining} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
-            
-            currentOrderDocId = null;
-            currentOrderData = null;
-            if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
-            switchView('tables');
-            showModal('BAŞARILI', 'Hesap tahsil edildi ve masa kapatıldı.', '', null, true);
+                pays.push({ amount: remaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
+                logs.push(createLog("HESAP KAPATILDI", `Kalan ${remaining} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
+                
+                currentOrderDocId = null;
+                currentOrderData = null;
+                if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
+                switchView('tables');
+                showModal('BAŞARILI', 'Hesap tahsil edildi ve masa kapatıldı.', '', null, true);
 
-            const batch = writeBatch(db);
-            batch.update(doc(db, "orders", oId), { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
-            batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
-            batch.commit().catch(() => {});
+                const batch = writeBatch(db);
+                batch.update(doc(db, "orders", oId), { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
+                batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+                await batch.commit();
+
+                const dateInput = document.getElementById('history-date-filter');
+                if (dateInput && dateInput.value) {
+                    loadFinanceForDate(dateInput.value);
+                }
+            } catch(err) {
+                showModal('HATA', 'Masa kapatılamadı: ' + err.message, '', null, true);
+            }
         });
     } else {
-        showModal('MASAYI KAPAT', 'AÇIK HESAP BULUNMUYOR. MASA BOŞALTILACAKTIR. ONAYLIYOR MUSUNUZ?', '', () => {
-            const logs = d.logs || [];
-            logs.push(createLog("MASA KAPATILDI", `Açık hesap olmadan masa boşaltıldı.`));
-            
-            currentOrderDocId = null;
-            currentOrderData = null;
-            if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
-            switchView('tables');
-            showModal('BAŞARILI', 'Masa boşaltıldı.', '', null, true);
+        showModal('MASAYI KAPAT', 'AÇIK HESAP BULUNMUYOR. MASA BOŞALTILACAKTIR. ONAYLIYOR MUSUNUZ?', '', async () => {
+            try {
+                const logs = [...(d.logs || [])];
+                logs.push(createLog("MASA KAPATILDI", `Açık hesap olmadan masa boşaltıldı.`));
+                
+                currentOrderDocId = null;
+                currentOrderData = null;
+                if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
+                switchView('tables');
+                showModal('BAŞARILI', 'Masa boşaltıldı.', '', null, true);
 
-            const batch = writeBatch(db);
-            batch.update(doc(db, "orders", oId), { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
-            batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
-            batch.commit().catch(() => {});
+                const batch = writeBatch(db);
+                batch.update(doc(db, "orders", oId), { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
+                batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+                await batch.commit();
+
+                const dateInput = document.getElementById('history-date-filter');
+                if (dateInput && dateInput.value) {
+                    loadFinanceForDate(dateInput.value);
+                }
+            } catch(err) {
+                showModal('HATA', 'İşlem başarısız: ' + err.message, '', null, true);
+            }
         });
     }
 });
@@ -1393,7 +1439,9 @@ async function loadStaff() {
             `;
             container.appendChild(div);
         });
-    } catch(err) {}
+    } catch(err) {
+        console.error(err);
+    }
 }
 
 document.getElementById('save-staff-btn').addEventListener('click', async () => {
@@ -1790,7 +1838,9 @@ document.getElementById('save-expense-btn').addEventListener('click', async () =
             const dateInput = document.getElementById('history-date-filter');
             if(dateInput) loadFinanceForDate(dateInput.value);
         }
-    } catch(e) {}
+    } catch(e) {
+        console.error(e);
+    }
 });
 
 window.deleteExpense = (id) => {
@@ -1869,6 +1919,8 @@ async function loadQRCategoriesAndProducts() {
             localStorage.setItem('twinA_menu_version', remoteVersion);
             
             window.renderQR();
-        } catch(e) {}
+        } catch(e) {
+            console.error(e);
+        }
     }
 }
