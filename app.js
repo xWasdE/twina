@@ -24,7 +24,7 @@ let isMaintenanceEnforced = false;
 let globalUnsubscribes = [];
 let timeUpdaterInterval = null;
 
-let liveOrderUnsubscribe = null;
+let liveOrderUnsubscribe = null; 
 
 let globalOrders = [];
 let globalExpenses = [];
