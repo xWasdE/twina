@@ -179,7 +179,7 @@ async function bootSystem() {
         const qrScreen = document.getElementById('qr-menu-app');
         qrScreen.style.display = 'flex';
         qrScreen.classList.add('active');
-        loadQRCategoriesAndProducts();
+        listenQRCategoriesAndProducts();
         return;
     }
 
@@ -195,7 +195,7 @@ async function bootSystem() {
                     return;
                 }
             }
-        } catch(e) { }
+        } catch(e) {}
     }
     
     hideAllScreens();
@@ -279,7 +279,6 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     const submitBtn = document.getElementById('login-submit-btn');
 
     errorBox.style.display = 'none';
-    
     const originalText = submitBtn.textContent;
     submitBtn.textContent = "BEKLENİYOR...";
     submitBtn.disabled = true;
@@ -355,6 +354,11 @@ async function startApp() {
     
     if(currentUser.role === 'admin') { 
         listenStaff(); 
+        
+        const dateInput = document.getElementById('history-date-filter');
+        if(dateInput) {
+            dateInput.value = toYYYYMMDD(new Date()); 
+        }
     }
 }
 
@@ -597,7 +601,7 @@ document.getElementById('transfer-table-btn').addEventListener('click', async ()
                 showModal('BAŞARILI', 'Adisyonlar başarıyla birleştirildi.', '', null, true);
             }
         } catch(err) {
-            showModal('HATA', 'Taşıma işlemi başarısız: ' + err.message, '', null, true);
+            showModal('HATA', 'Taşıma işlemi başarısız.', '', null, true);
         }
     });
 });
@@ -652,7 +656,7 @@ function handleTableClick(tableName, tableData) {
 }
 
 function createNewOrder(tableName) {
-    const orderId = 'ORD-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+    const orderId = 'ORD-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
     const orderRef = doc(db, "orders", orderId);
     const ts = new Date().toISOString();
     
@@ -1040,9 +1044,7 @@ function renderAdisyon(o) {
 function listenOrderData(orderId) {
     if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
     
-    if (!currentOrderData || currentOrderData.tableId !== currentTableId) {
-        currentOrderData = { items: [], partialPayments: [], paid: 0, total: 0, logs: [] };
-    }
+    currentOrderData = { items: [], partialPayments: [], paid: 0, total: 0, logs: [] };
     renderAdisyon(currentOrderData);
 
     liveOrderUnsubscribe = onSnapshot(doc(db, "orders", orderId), (docSnap) => {
@@ -1055,34 +1057,34 @@ function listenOrderData(orderId) {
 }
 
 window.addItemToOrder = function(product) {
-    if(!currentOrderDocId || !currentOrderData) return;
+    if(!currentOrderDocId) return;
+    if(!currentOrderData) currentOrderData = { items: [], partialPayments: [], paid: 0, total: 0, logs: [] };
     
-    const items = currentOrderData.items ? [...currentOrderData.items] : [];
-    const logs = currentOrderData.logs ? [...currentOrderData.logs] : [];
+    const items = currentOrderData.items || [];
+    const logs = currentOrderData.logs || [];
     let currentTotal = currentOrderData.total || 0;
 
     items.push({ name: product.name, price: product.price, waiter: currentUser.name, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}) });
     logs.push(createLog("ÜRÜN EKLENDİ", `1x ${product.name} eklendi.`));
-    
-    const newTotal = currentTotal + product.price;
+    currentTotal += product.price;
 
     currentOrderData.items = items;
     currentOrderData.logs = logs;
-    currentOrderData.total = newTotal;
-    
+    currentOrderData.total = currentTotal;
+
     renderAdisyon(currentOrderData);
 
     const batch = writeBatch(db);
-    batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: newTotal });
-    batch.update(doc(db, "tables", currentTableId), { totalAmount: newTotal });
+    batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: currentTotal });
+    batch.update(doc(db, "tables", currentTableId), { totalAmount: currentTotal });
     batch.commit().catch(()=>{});
 };
 
 window.deleteOrderItem = function(index) {
     if(!currentOrderDocId || !currentOrderData) return;
     
-    const items = [...(currentOrderData.items || [])];
-    const logs = [...(currentOrderData.logs || [])];
+    const items = currentOrderData.items || [];
+    const logs = currentOrderData.logs || [];
     let currentTotal = currentOrderData.total || 0;
 
     if(items[index] && !items[index].deleted) {
@@ -1110,13 +1112,11 @@ window.addNoteToItem = function(orderId, index, currentNote) {
         <input type="text" id="item-note" value="${currentNote}" placeholder="Notunuz...">
     `, (data) => {
         if(!currentOrderData) return;
-        const items = [...(currentOrderData.items || [])];
+        const items = currentOrderData.items || [];
         if(items[index]) {
             items[index].note = data['item-note'];
-            
             currentOrderData.items = items;
             renderAdisyon(currentOrderData);
-            
             updateDoc(doc(db, "orders", orderId), { items: items }).catch(()=>{});
         }
     });
@@ -1135,18 +1135,19 @@ document.getElementById('partial-pay-btn').addEventListener('click', () => {
         const amt = Number(data['pay-amt']);
         const method = data['pay-method'];
         if(amt > 0) {
-            const pays = [...(currentOrderData.partialPayments || [])];
-            const logs = [...(currentOrderData.logs || [])];
+            const d = currentOrderData;
+            const pays = d.partialPayments || [];
+            const logs = d.logs || [];
             
-            const newPaid = (currentOrderData.paid || 0) + amt;
+            const newPaid = (d.paid || 0) + amt;
             
             pays.push({ amount: amt, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
             logs.push(createLog("ÖDEME ALINDI", `${method} ile tahsilat yapıldı: ${amt} ₺`));
             
-            currentOrderData.paid = newPaid;
-            currentOrderData.partialPayments = pays;
-            currentOrderData.logs = logs;
-            renderAdisyon(currentOrderData);
+            d.paid = newPaid;
+            d.partialPayments = pays;
+            d.logs = logs;
+            renderAdisyon(d);
 
             const batch = writeBatch(db);
             batch.update(doc(db, "orders", currentOrderDocId), { partialPayments: pays, paid: newPaid, logs: logs });
@@ -1205,24 +1206,25 @@ document.getElementById('item-pay-btn').addEventListener('click', () => {
         });
 
         if(totalToPay > 0) {
-            const pays = [...(currentOrderData.partialPayments || [])];
-            const logs = [...(currentOrderData.logs || [])];
-            let freshItems = [...(currentOrderData.items || [])];
+            const d = currentOrderData;
+            const pays = d.partialPayments || [];
+            const logs = d.logs || [];
+            let freshItems = d.items || [];
             
             selectedIndices.forEach(idx => {
                 freshItems[idx].paid = true;
             });
             
-            const newPaid = (currentOrderData.paid || 0) + totalToPay;
+            const newPaid = (d.paid || 0) + totalToPay;
             
             pays.push({ amount: totalToPay, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
             logs.push(createLog("ÜRÜN BAZLI ÖDEME", `${method} ile tahsil edildi: ${totalToPay} ₺ (${itemNames.join(', ')})`));
             
-            currentOrderData.items = freshItems;
-            currentOrderData.paid = newPaid;
-            currentOrderData.partialPayments = pays;
-            currentOrderData.logs = logs;
-            renderAdisyon(currentOrderData);
+            d.items = freshItems;
+            d.paid = newPaid;
+            d.partialPayments = pays;
+            d.logs = logs;
+            renderAdisyon(d);
 
             const batch = writeBatch(db);
             batch.update(doc(db, "orders", currentOrderDocId), { items: freshItems, partialPayments: pays, paid: newPaid, logs: logs });
@@ -1265,8 +1267,8 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
             </select>
         `, (data) => {
             const method = data['pay-method-full'];
-            const pays = [...(d.partialPayments || [])];
-            const logs = [...(d.logs || [])];
+            const pays = d.partialPayments || [];
+            const logs = d.logs || [];
 
             pays.push({ amount: remaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
             logs.push(createLog("HESAP KAPATILDI", `Kalan ${remaining} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
@@ -1295,7 +1297,7 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
         });
     } else {
         showModal('MASAYI KAPAT', 'AÇIK HESAP BULUNMUYOR. MASA BOŞALTILACAKTIR. ONAYLIYOR MUSUNUZ?', '', () => {
-            const logs = [...(d.logs || [])];
+            const logs = d.logs || [];
             logs.push(createLog("MASA KAPATILDI", `Açık hesap olmadan masa boşaltıldı.`));
             
             currentOrderDocId = null;
@@ -1387,7 +1389,7 @@ function listenStaff() {
             } else {
                 actionsHtml += `
                     <button class="action-btn btn-confirm" onclick="toggleStaffRole('${docSnap.id}', '${u.role}')">${u.role === 'admin' ? 'GARSON YAP' : 'ADMİN YAP'}</button>
-                    <button class="action-btn btn-cancel" onclick="toggleStaffStatus('${docSnap.id}', '${u.status}')">${u.status === 'passive' ? 'AKTİFLEŞTİR' : 'PASFE AL'}</button>
+                    <button class="action-btn btn-cancel" onclick="toggleStaffStatus('${docSnap.id}', '${u.status}')">${u.status === 'passive' ? 'AKTİFLEŞTİR' : 'PASİFE AL'}</button>
                     <button class="action-btn btn-red" onclick="deleteStaff('${docSnap.id}')">SİL</button>
                 `;
             }
@@ -1661,7 +1663,7 @@ function renderFinanceHistoryList() {
     }
 }
 
-document.getElementById('z-report-btn').addEventListener('click', async () => {
+document.getElementById('z-report-btn').addEventListener('click', () => {
     const filterInput = document.getElementById('history-date-filter').value || toYYYYMMDD(new Date());
     const [y, m, d] = filterInput.split('-');
     const reportDisplayDate = `${d}.${m}.${y}`;
