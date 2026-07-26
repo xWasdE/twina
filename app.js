@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, collection, getDocs, getDoc, setDoc, updateDoc, doc, onSnapshot, query, where, addDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, getDoc, setDoc, updateDoc, doc, onSnapshot, query, where, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyDzTVIzmntO7ohuHxYYexXRi-vtPk_WCeY",
@@ -17,16 +17,16 @@ let currentUser = null;
 let currentTableId = null;
 let currentOrderDocId = null;
 let currentCategory = '';
-let companyInfo = { name: "TWIN-A", phone: "", address: "", open: "", close: "", broadcast: "", maintenance: false, menuVersion: "1" };
+let companyInfo = { name: "TWIN-A", phone: "", address: "", open: "", close: "", broadcast: "", maintenance: false };
 let editingProductId = null;
 let editingProductStock = true;
 let isMaintenanceEnforced = false;
 let globalUnsubscribes = [];
 let timeUpdaterInterval = null;
-let liveOrderUnsubscribe = null;
 
 let globalOrders = [];
 let globalExpenses = [];
+let chartInstances = {};
 let globalCategoriesList = [];
 let globalProductsList = []; 
 
@@ -36,6 +36,7 @@ const urlParams = new URLSearchParams(window.location.search);
 const isQRMode = urlParams.get('qr') === '1';
 const expectedHash = window.location.hash || '';
 
+
 const maintBtn = document.getElementById('maintenance-admin-login-btn');
 if (maintBtn) maintBtn.textContent = "ANA SAYFAYA DÖN";
 
@@ -43,6 +44,9 @@ window.toggleTheme = () => {
     const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('theme', next);
+    if(document.getElementById('dashboard-view') && document.getElementById('dashboard-view').style.display === 'block') {
+        if(typeof initDashboard === 'function') initDashboard(); 
+    }
 };
 
 function initTheme() {
@@ -166,17 +170,14 @@ async function bootSystem() {
         return;
     }
 
-    try {
-        const snap = await getDoc(doc(db, "settings", "global"));
+    onSnapshot(doc(db, "settings", "global"), (snap) => {
         if (snap.exists()) {
             companyInfo = snap.data();
             applyGlobalSettings();
         } else {
-            await setDoc(doc(db, "settings", "global"), companyInfo);
+            setDoc(doc(db, "settings", "global"), companyInfo);
         }
-    } catch(e) {
-        console.error(e);
-    }
+    });
 
     if (isQRMode) {
         hideAllScreens();
@@ -251,16 +252,6 @@ function applyGlobalSettings() {
     } else {
         if(isMaintenanceEnforced) {
             window.location.reload(); 
-        }
-    }
-
-    const localVersion = localStorage.getItem('twinA_menu_version');
-    const remoteVersion = companyInfo.menuVersion || '1';
-    if(localVersion !== remoteVersion) {
-        if(isQRMode) {
-            loadQRCategoriesAndProducts();
-        } else if (currentUser) {
-            fetchMenuData(); 
         }
     }
 }
@@ -346,28 +337,32 @@ function startApp() {
         document.getElementById('staff-nav').style.display = 'flex';
     }
 
+    
     getDocs(collection(db, "tables")).then(snap => {
         if (snap.empty) {
-            const batch = writeBatch(db);
             for (let i = 1; i <= 28; i++) {
-                batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '' });
+                setDoc(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '' });
             }
-            batch.commit().catch(e => console.error(e));
         }
     }).catch(e => console.error(e));
 
     switchView('tables');
     listenTables();
-    loadMenuSmart();
+    listenCategories(); 
     
     if(currentUser.role === 'admin') { 
-        loadStaff(); 
+        listenStaff(); 
         
         const dateInput = document.getElementById('history-date-filter');
         if(dateInput) {
             dateInput.value = toYYYYMMDD(new Date()); 
             loadFinanceForDate(dateInput.value); 
         }
+        
+        const sDate = document.getElementById('dash-start-date');
+        const eDate = document.getElementById('dash-end-date');
+        if(sDate && !sDate.value) sDate.value = toYYYYMMDD(new Date());
+        if(eDate && !eDate.value) eDate.value = toYYYYMMDD(new Date());
     }
 }
 
@@ -402,6 +397,7 @@ function switchView(viewName) {
         menu: document.getElementById('menu-view'),
         staff: document.getElementById('staff-view'),
         finance: document.getElementById('finance-view'),
+        dashboard: document.getElementById('dashboard-view'),
         settings: document.getElementById('settings-view'),
         'staff-settings': document.getElementById('staff-settings-view')
     };
@@ -413,6 +409,10 @@ function switchView(viewName) {
         btn.classList.remove('active');
         if(btn.dataset.target === `${viewName}-view`) btn.classList.add('active');
     });
+
+    if(viewName === 'dashboard' && currentUser && currentUser.role === 'admin') {
+        initDashboard();
+    }
 }
 
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -489,11 +489,9 @@ document.getElementById('update-table-count-btn')?.addEventListener('click', asy
     const currentCount = existingTables.length > 0 ? existingTables[existingTables.length - 1].num : 0;
     
     if (targetCount > currentCount) {
-        const batch = writeBatch(db);
         for(let i = currentCount + 1; i <= targetCount; i++) {
-            batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            await setDoc(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
         }
-        await batch.commit();
         showModal('BAŞARILI', `Masa sayısı ${targetCount} olarak güncellendi.`, '', null, true);
     } else if (targetCount < currentCount) {
         let canDelete = true;
@@ -508,11 +506,9 @@ document.getElementById('update-table-count-btn')?.addEventListener('click', asy
             showModal('HATA', 'Silinmek istenen masalar arasında dolu veya rezerve olanlar var. Lütfen önce o masaları kapatın.', '', null, true);
             return;
         }
-        const batch = writeBatch(db);
         for(let i = targetCount + 1; i <= currentCount; i++) {
-            batch.delete(doc(db, "tables", `MASA ${i}`));
+            await deleteDoc(doc(db, "tables", `MASA ${i}`));
         }
-        await batch.commit();
         showModal('BAŞARILI', `Masa sayısı ${targetCount} olarak düşürüldü.`, '', null, true);
     } else {
         showModal('BİLGİ', 'Masa sayısı zaten aynı.', '', null, true);
@@ -548,57 +544,49 @@ document.getElementById('transfer-table-btn').addEventListener('click', async ()
     optionsHtml += '</select>';
 
     showModal('MASA TAŞI / BİRLEŞTİR', 'Hedef masayı seçiniz:', optionsHtml, async (data) => {
-        try {
-            const targetId = data['target-table-select'];
-            if(!targetId) return;
+        const targetId = data['target-table-select'];
+        if(!targetId) return;
 
-            const targetTableSnap = await getDoc(doc(db, "tables", targetId));
-            const targetData = targetTableSnap.data();
-            const currentOrderSnap = await getDoc(doc(db, "orders", currentOrderDocId));
-            const orderData = currentOrderSnap.data();
+        const targetTableSnap = await getDoc(doc(db, "tables", targetId));
+        const targetData = targetTableSnap.data();
+        const currentOrderSnap = await getDoc(doc(db, "orders", currentOrderDocId));
+        const orderData = currentOrderSnap.data();
+
+        if(targetData.status === 'empty') {
+            await updateDoc(doc(db, "orders", currentOrderDocId), { 
+                tableId: targetId, 
+                logs: [...(orderData.logs||[]), createLog("Masa Taşındı", `${currentTableId} -> ${targetId}`)] 
+            });
+            await updateDoc(doc(db, "tables", targetId), { 
+                status: 'active', currentOrderId: currentOrderDocId, totalAmount: orderData.total, paidAmount: orderData.paid, timestamp: new Date().toISOString() 
+            });
+            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
             
-            const batch = writeBatch(db);
+            showModal('BAŞARILI', 'Masa başarıyla taşındı.', '', null, true);
+            currentOrderDocId = null;
+            switchView('tables');
 
-            if(targetData.status === 'empty') {
-                batch.update(doc(db, "orders", currentOrderDocId), { 
-                    tableId: targetId, 
-                    logs: [...(orderData.logs||[]), createLog("Masa Taşındı", `${currentTableId} -> ${targetId}`)] 
-                });
-                batch.update(doc(db, "tables", targetId), { 
-                    status: 'active', currentOrderId: currentOrderDocId, totalAmount: orderData.total, paidAmount: orderData.paid, timestamp: new Date().toISOString() 
-                });
-                batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
-                
-                await batch.commit();
-                showModal('BAŞARILI', 'Masa başarıyla taşındı.', '', null, true);
-                currentOrderDocId = null;
-                switchView('tables');
+        } else if (targetData.status === 'active') {
+            const targetOrderSnap = await getDoc(doc(db, "orders", targetData.currentOrderId));
+            const targetOrderData = targetOrderSnap.data();
+            
+            const mergedItems = [...(targetOrderData.items||[]), ...(orderData.items||[])];
+            const mergedPayments = [...(targetOrderData.partialPayments||[]), ...(orderData.partialPayments||[])];
+            const mergedLogs = [...(targetOrderData.logs||[]), ...(orderData.logs||[]), createLog("Adisyon Birleştirildi", `${currentTableId} hesabı bu masaya aktarıldı.`)];
+            const mergedTotal = (targetOrderData.total||0) + (orderData.total||0);
+            const mergedPaid = (targetOrderData.paid||0) + (orderData.paid||0);
 
-            } else if (targetData.status === 'active') {
-                const targetOrderSnap = await getDoc(doc(db, "orders", targetData.currentOrderId));
-                const targetOrderData = targetOrderSnap.data();
-                
-                const mergedItems = [...(targetOrderData.items||[]), ...(orderData.items||[])];
-                const mergedPayments = [...(targetOrderData.partialPayments||[]), ...(orderData.partialPayments||[])];
-                const mergedLogs = [...(targetOrderData.logs||[]), ...(orderData.logs||[]), createLog("Adisyon Birleştirildi", `${currentTableId} hesabı bu masaya aktarıldı.`)];
-                const mergedTotal = (targetOrderData.total||0) + (orderData.total||0);
-                const mergedPaid = (targetOrderData.paid||0) + (orderData.paid||0);
+            await updateDoc(doc(db, "orders", targetData.currentOrderId), {
+                items: mergedItems, partialPayments: mergedPayments, total: mergedTotal, paid: mergedPaid, logs: mergedLogs
+            });
+            await updateDoc(doc(db, "tables", targetId), { totalAmount: mergedTotal, paidAmount: mergedPaid });
+            
+            await updateDoc(doc(db, "orders", currentOrderDocId), { status: 'merged_deleted' });
+            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
 
-                batch.update(doc(db, "orders", targetData.currentOrderId), {
-                    items: mergedItems, partialPayments: mergedPayments, total: mergedTotal, paid: mergedPaid, logs: mergedLogs
-                });
-                batch.update(doc(db, "tables", targetId), { totalAmount: mergedTotal, paidAmount: mergedPaid });
-                
-                batch.update(doc(db, "orders", currentOrderDocId), { status: 'merged_deleted' });
-                batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
-
-                await batch.commit();
-                showModal('BAŞARILI', 'Adisyonlar başarıyla birleştirildi.', '', null, true);
-                currentOrderDocId = null;
-                switchView('tables');
-            }
-        } catch(err) {
-            showModal('HATA', 'Taşıma işlemi başarısız: ' + err.message, '', null, true);
+            showModal('BAŞARILI', 'Adisyonlar başarıyla birleştirildi.', '', null, true);
+            currentOrderDocId = null;
+            switchView('tables');
         }
     });
 });
@@ -653,26 +641,16 @@ function handleTableClick(tableName, tableData) {
 }
 
 async function createNewOrder(tableName) {
-    try {
-        const orderId = 'ORD-' + Math.random().toString(36).substr(2, 6).toUpperCase();
-        const orderRef = doc(db, "orders", orderId);
-        const tableRef = doc(db, "tables", tableName);
-        const ts = new Date().toISOString();
-        
-        const batch = writeBatch(db);
-        
-        batch.set(orderRef, {
-            tableId: tableName, status: 'open', items: [], partialPayments: [], paid: 0, total: 0, 
-            createdAt: ts, creator: currentUser.name, logs: [createLog("Masa Açıldı", `${tableName} siparişe açıldı.`)]
-        });
-        
-        batch.update(tableRef, { status: 'active', currentOrderId: orderId, reservedName: '', totalAmount: 0, paidAmount: 0, timestamp: ts });
-        
-        await batch.commit();
-        openOrderView(tableName, orderId);
-    } catch(err) {
-        showModal('HATA', 'Masa açılamadı: ' + err.message, '', null, true);
-    }
+    const orderId = 'ORD-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+    const orderRef = doc(db, "orders", orderId);
+    const ts = new Date().toISOString();
+    
+    await setDoc(orderRef, {
+        tableId: tableName, status: 'open', items: [], partialPayments: [], paid: 0, total: 0, 
+        createdAt: ts, creator: currentUser.name, logs: [createLog("Masa Açıldı", `${tableName} siparişe açıldı.`)]
+    });
+    await updateDoc(doc(db, "tables", tableName), { status: 'active', currentOrderId: orderId, reservedName: '', totalAmount: 0, paidAmount: 0, timestamp: ts });
+    openOrderView(tableName, orderId);
 }
 
 function openOrderView(tableName, orderId) {
@@ -689,39 +667,14 @@ document.getElementById('back-to-tables').addEventListener('click', () => {
     switchView('tables');
 });
 
-async function fetchMenuData() {
-    const [catSnap, prodSnap] = await Promise.all([
-        getDocs(collection(db, "categories")),
-        getDocs(collection(db, "products"))
-    ]);
-    
-    globalCategoriesList = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-    
-    globalProductsList = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    globalProductsList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-    
-    localStorage.setItem('twinA_menu', JSON.stringify({ cats: globalCategoriesList, prods: globalProductsList }));
-    localStorage.setItem('twinA_menu_version', companyInfo.menuVersion || '1');
-    
-    renderCategoriesUI();
-    renderProductsUI();
-}
-
-function loadMenuSmart() {
-    const localMenu = localStorage.getItem('twinA_menu');
-    const localVersion = localStorage.getItem('twinA_menu_version');
-    const remoteVersion = companyInfo.menuVersion || '1';
-
-    if (localMenu && localVersion === remoteVersion) {
-        const parsed = JSON.parse(localMenu);
-        globalCategoriesList = parsed.cats;
-        globalProductsList = parsed.prods;
+function listenCategories() {
+    if(window.unsubCats) window.unsubCats();
+    window.unsubCats = onSnapshot(collection(db, "categories"), (snapshot) => {
+        globalCategoriesList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
         renderCategoriesUI();
-        renderProductsUI();
-    } else {
-        fetchMenuData();
-    }
+    });
+    globalUnsubscribes.push(window.unsubCats);
 }
 
 function renderCategoriesUI() {
@@ -770,6 +723,9 @@ function renderCategoriesUI() {
     if(editCatSelect && selectedCatId) {
         editCatSelect.value = selectedCatId;
     }
+    
+    if(!window.unsubProds) listenProducts();
+    else renderProductsUI();
 }
 
 document.getElementById('add-category-btn').addEventListener('click', async () => {
@@ -817,11 +773,11 @@ document.getElementById('update-cat-btn').addEventListener('click', async () => 
     if(oldName !== newName) {
         const q = query(collection(db, "products"), where("cat", "==", oldName));
         const snap = await getDocs(q);
-        const batch = writeBatch(db);
+        const updatePromises = [];
         snap.forEach((d) => {
-            batch.update(doc(db, "products", d.id), { cat: newName });
+            updatePromises.push(updateDoc(doc(db, "products", d.id), { cat: newName }));
         });
-        await batch.commit();
+        await Promise.all(updatePromises);
     }
     
     document.getElementById('edit-cat-select').value = '';
@@ -844,6 +800,15 @@ document.getElementById('delete-cat-btn').addEventListener('click', () => {
         showModal('BAŞARILI', 'Kategori silindi.', '', null, true);
     });
 });
+
+function listenProducts() {
+    if(window.unsubProds) window.unsubProds();
+    window.unsubProds = onSnapshot(collection(db, "products"), (snapshot) => {
+        globalProductsList = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+        renderProductsUI();
+    });
+    globalUnsubscribes.push(window.unsubProds);
+}
 
 function renderProductsUI() {
     const container = document.getElementById('products-container');
@@ -917,9 +882,7 @@ function renderProductsUI() {
     }
 }
 
-window.toggleStock = async (id, state) => { 
-    await updateDoc(doc(db, "products", id), { stock: state }); 
-};
+window.toggleStock = async (id, state) => { await updateDoc(doc(db, "products", id), { stock: state }); };
 window.deleteProduct = (id) => {
     showModal('ÜRÜNÜ SİL', 'BU ÜRÜNÜ SİLMEK İSTEDİĞİNİZE EMİN MİSİNİZ?', '', async () => { 
         await deleteDoc(doc(db, "products", id)); 
@@ -1036,61 +999,41 @@ function listenOrderData(orderId) {
 
         document.getElementById('adisyon-subtotal').textContent = `${currentTotal} ₺`;
         document.getElementById('adisyon-total').textContent = `${currentTotal - totalPaid} ₺`;
+        
+        if(o.total !== currentTotal) {
+            updateDoc(doc(db, "orders", orderId), { total: currentTotal }).then(()=>{
+                if(currentTableId) updateDoc(doc(db, "tables", currentTableId), { totalAmount: currentTotal });
+            });
+        }
     });
 }
 
 async function addItemToOrder(product) {
     if(!currentOrderDocId) return;
-    try {
-        const orderRef = doc(db, "orders", currentOrderDocId);
-        const tableRef = doc(db, "tables", currentTableId);
-        
-        const snap = await getDoc(orderRef);
-        if (!snap.exists()) return;
-        
-        const data = snap.data();
-        const items = data.items || [];
-        const logs = data.logs || [];
-        
-        items.push({ name: product.name, price: product.price, waiter: currentUser.name, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}) });
-        logs.push(createLog("ÜRÜN EKLENDİ", `1x ${product.name} eklendi.`));
-        
-        const newTotal = (data.total || 0) + product.price;
-        
-        const batch = writeBatch(db);
-        batch.update(orderRef, { items: items, logs: logs, total: newTotal });
-        batch.update(tableRef, { totalAmount: newTotal });
-        await batch.commit();
-    } catch(err) {
-        showModal('HATA', 'Ürün eklenemedi. Lütfen tekrar deneyiniz. Detay: ' + err.message, '', null, true);
-    }
+    const orderRef = doc(db, "orders", currentOrderDocId);
+    const snap = await getDoc(orderRef);
+    const items = snap.data().items || [];
+    const logs = snap.data().logs || [];
+    
+    items.push({ name: product.name, price: product.price, waiter: currentUser.name, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}) });
+    logs.push(createLog("ÜRÜN EKLENDİ", `1x ${product.name} eklendi.`));
+    
+    await updateDoc(orderRef, { items: items, logs: logs });
 }
 
 window.deleteOrderItem = async (index) => {
     if(!currentOrderDocId) return;
-    try {
-        const orderRef = doc(db, "orders", currentOrderDocId);
-        const tableRef = doc(db, "tables", currentTableId);
-        
-        const snap = await getDoc(orderRef);
-        const data = snap.data();
-        const items = data.items || [];
-        const logs = data.logs || [];
-        
-        if(items[index] && !items[index].deleted) {
-            items[index].deleted = true;
-            items[index].deletedBy = currentUser.name;
-            
-            const newTotal = (data.total || 0) - items[index].price;
-            logs.push(createLog("ÜRÜN İPTALİ", `1x ${items[index].name} listeden çıkarıldı.`));
-            
-            const batch = writeBatch(db);
-            batch.update(orderRef, { items: items, logs: logs, total: newTotal });
-            batch.update(tableRef, { totalAmount: newTotal });
-            await batch.commit();
-        }
-    } catch(err) {
-        showModal('HATA', 'Ürün silinemedi: ' + err.message, '', null, true);
+    const orderRef = doc(db, "orders", currentOrderDocId);
+    const snap = await getDoc(orderRef);
+    const data = snap.data();
+    const items = data.items || [];
+    const logs = data.logs || [];
+    
+    if(items[index] && !items[index].deleted) {
+        items[index].deleted = true;
+        items[index].deletedBy = currentUser.name;
+        logs.push(createLog("ÜRÜN İPTALİ", `1x ${items[index].name} listeden çıkarıldı.`));
+        await updateDoc(orderRef, { items: items, logs: logs });
     }
 };
 
@@ -1098,16 +1041,12 @@ window.addNoteToItem = (orderId, index, currentNote) => {
     showModal('ÜRÜNE NOT EKLE', 'Siparişe özel not giriniz (Örn: Şekersiz, Ketçapsız vb.):', `
         <input type="text" id="item-note" value="${currentNote}" placeholder="Notunuz...">
     `, async (data) => {
-        try {
-            const orderRef = doc(db, "orders", orderId);
-            const snap = await getDoc(orderRef);
-            const items = snap.data().items || [];
-            if(items[index]) {
-                items[index].note = data['item-note'];
-                await updateDoc(orderRef, { items: items });
-            }
-        } catch(err) {
-            showModal('HATA', 'Not eklenemedi: ' + err.message, '', null, true);
+        const orderRef = doc(db, "orders", orderId);
+        const snap = await getDoc(orderRef);
+        const items = snap.data().items || [];
+        if(items[index]) {
+            items[index].note = data['item-note'];
+            await updateDoc(orderRef, { items: items });
         }
     });
 };
@@ -1122,205 +1061,152 @@ document.getElementById('partial-pay-btn').addEventListener('click', () => {
             <option value="Yemek Kartı">Yemek Kartı</option>
         </select>
     `, async (data) => {
-        try {
-            const amt = Number(data['pay-amt']);
-            const method = data['pay-method'];
-            if(amt > 0) {
-                const ref = doc(db, "orders", currentOrderDocId);
-                const tableRef = doc(db, "tables", currentTableId);
-                
-                const snap = await getDoc(ref);
-                const d = snap.data();
-                const pays = d.partialPayments || [];
-                const logs = d.logs || [];
-                
-                const newPaid = (d.paid || 0) + amt;
-                pays.push({ amount: amt, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
-                logs.push(createLog("ÖDEME ALINDI", `${method} ile tahsilat yapıldı: ${amt} ₺`));
-                
-                const batch = writeBatch(db);
-                batch.update(ref, { partialPayments: pays, paid: newPaid, logs: logs });
-                batch.update(tableRef, { paidAmount: newPaid });
-                await batch.commit();
-                
-                showModal('BAŞARILI', 'Kısmi ödeme kaydedildi.', '', null, true);
-            }
-        } catch(err) {
-            showModal('HATA', 'Ödeme alınamadı: ' + err.message, '', null, true);
+        const amt = Number(data['pay-amt']);
+        const method = data['pay-method'];
+        if(amt > 0) {
+            const ref = doc(db, "orders", currentOrderDocId);
+            const snap = await getDoc(ref);
+            const d = snap.data();
+            const pays = d.partialPayments || [];
+            const logs = d.logs || [];
+            
+            const newPaid = (d.paid || 0) + amt;
+            pays.push({ amount: amt, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
+            logs.push(createLog("ÖDEME ALINDI", `${method} ile tahsilat yapıldı: ${amt} ₺`));
+            
+            await updateDoc(ref, { partialPayments: pays, paid: newPaid, logs: logs });
+            await updateDoc(doc(db, "tables", currentTableId), { paidAmount: newPaid });
+            showModal('BAŞARILI', 'Kısmi ödeme kaydedildi.', '', null, true);
         }
     });
 });
 
 document.getElementById('item-pay-btn').addEventListener('click', async () => {
     if(!currentOrderDocId) return;
-    try {
-        const snap = await getDoc(doc(db, "orders", currentOrderDocId));
-        const o = snap.data();
-        const items = o.items || [];
-        
-        let checklistHtml = '<div id="item-pay-list" style="max-height:180px; overflow-y:auto; text-align:left; margin-bottom:15px; border:1px solid var(--border); padding:10px; border-radius:6px;">';
-        let hasUnpaid = false;
-        
-        items.forEach((item, idx) => {
-            if(!item.deleted && !item.paid) {
-                hasUnpaid = true;
-                checklistHtml += `
-                    <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer;">
-                        <input type="checkbox" class="item-pay-check custom-checkbox" data-idx="${idx}" data-price="${item.price}" data-name="${item.name}">
-                        <span style="font-weight:bold; font-size:12px; color:var(--text);">${item.name} - <span style="color:var(--accent);">${item.price} ₺</span></span>
-                    </label>
-                `;
-            }
-        });
-        checklistHtml += '</div>';
-
-        if(!hasUnpaid) {
-            showModal('BİLGİ', 'Ödenecek açık ürün bulunmuyor.', '', null, true);
-            return;
+    const snap = await getDoc(doc(db, "orders", currentOrderDocId));
+    const o = snap.data();
+    const items = o.items || [];
+    
+    let checklistHtml = '<div id="item-pay-list" style="max-height:180px; overflow-y:auto; text-align:left; margin-bottom:15px; border:1px solid var(--border); padding:10px; border-radius:6px;">';
+    let hasUnpaid = false;
+    
+    items.forEach((item, idx) => {
+        if(!item.deleted && !item.paid) {
+            hasUnpaid = true;
+            checklistHtml += `
+                <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer;">
+                    <input type="checkbox" class="item-pay-check custom-checkbox" data-idx="${idx}" data-price="${item.price}" data-name="${item.name}">
+                    <span style="font-weight:bold; font-size:12px; color:var(--text);">${item.name} - <span style="color:var(--accent);">${item.price} ₺</span></span>
+                </label>
+            `;
         }
+    });
+    checklistHtml += '</div>';
 
-        checklistHtml += `
-            <div style="font-size:13px; font-weight:900; margin-bottom:10px;">SEÇİLEN TOPLAM: <span id="item-pay-total" style="color:var(--accent); font-size:18px;">0</span> ₺</div>
-            <select id="item-pay-method">
-                <option value="Nakit">Nakit</option>
-                <option value="Kredi Kartı">Kredi Kartı</option>
-                <option value="Yemek Kartı">Yemek Kartı</option>
-            </select>
-        `;
+    if(!hasUnpaid) {
+        showModal('BİLGİ', 'Ödenecek açık ürün bulunmuyor.', '', null, true);
+        return;
+    }
 
-        showModal('ÜRÜN BAZLI ÖDEME', 'Ödenecek ürünleri seçiniz:', checklistHtml, async (data) => {
-            try {
-                const method = data['item-pay-method'];
-                let totalToPay = 0;
-                let selectedIndices = [];
-                let itemNames = [];
-                
-                document.querySelectorAll('.item-pay-check:checked').forEach(chk => {
-                    selectedIndices.push(parseInt(chk.getAttribute('data-idx')));
-                    totalToPay += parseFloat(chk.getAttribute('data-price'));
-                    itemNames.push(chk.getAttribute('data-name'));
-                });
+    checklistHtml += `
+        <div style="font-size:13px; font-weight:900; margin-bottom:10px;">SEÇİLEN TOPLAM: <span id="item-pay-total" style="color:var(--accent); font-size:18px;">0</span> ₺</div>
+        <select id="item-pay-method">
+            <option value="Nakit">Nakit</option>
+            <option value="Kredi Kartı">Kredi Kartı</option>
+            <option value="Yemek Kartı">Yemek Kartı</option>
+        </select>
+    `;
 
-                if(totalToPay > 0) {
-                    const ref = doc(db, "orders", currentOrderDocId);
-                    const tableRef = doc(db, "tables", currentTableId);
-                    
-                    const refSnap = await getDoc(ref);
-                    const d = refSnap.data();
-                    const pays = d.partialPayments || [];
-                    const logs = d.logs || [];
-                    let freshItems = d.items || [];
-                    
-                    selectedIndices.forEach(idx => {
-                        freshItems[idx].paid = true;
-                    });
-                    
-                    const newPaid = (d.paid || 0) + totalToPay;
-                    pays.push({ amount: totalToPay, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
-                    logs.push(createLog("ÜRÜN BAZLI ÖDEME", `${method} ile tahsil edildi: ${totalToPay} ₺ (${itemNames.join(', ')})`));
-                    
-                    const batch = writeBatch(db);
-                    batch.update(ref, { items: freshItems, partialPayments: pays, paid: newPaid, logs: logs });
-                    batch.update(tableRef, { paidAmount: newPaid });
-                    await batch.commit();
-                    
-                    showModal('BAŞARILI', 'Seçilen ürünlerin ödemesi alındı.', '', null, true);
-                }
-            } catch(err) {
-                showModal('HATA', 'Ödeme başarısız: ' + err.message, '', null, true);
-            }
+    showModal('ÜRÜN BAZLI ÖDEME', 'Ödenecek ürünleri seçiniz:', checklistHtml, async (data) => {
+        const method = data['item-pay-method'];
+        
+        let totalToPay = 0;
+        let selectedIndices = [];
+        let itemNames = [];
+        
+        document.querySelectorAll('.item-pay-check:checked').forEach(chk => {
+            selectedIndices.push(parseInt(chk.getAttribute('data-idx')));
+            totalToPay += parseFloat(chk.getAttribute('data-price'));
+            itemNames.push(chk.getAttribute('data-name'));
         });
 
-        setTimeout(() => {
-            const checks = document.querySelectorAll('.item-pay-check');
-            const totalEl = document.getElementById('item-pay-total');
-            checks.forEach(c => {
-                c.addEventListener('change', () => {
-                    let t = 0;
-                    document.querySelectorAll('.item-pay-check:checked').forEach(chk => {
-                        t += parseFloat(chk.getAttribute('data-price'));
-                    });
-                    totalEl.textContent = t;
-                });
+        if(totalToPay > 0) {
+            const ref = doc(db, "orders", currentOrderDocId);
+            const refSnap = await getDoc(ref);
+            const d = refSnap.data();
+            const pays = d.partialPayments || [];
+            const logs = d.logs || [];
+            let freshItems = d.items || [];
+            
+            selectedIndices.forEach(idx => {
+                freshItems[idx].paid = true;
             });
-        }, 100);
-    } catch(err) {
-        showModal('HATA', 'Veriler alınamadı: ' + err.message, '', null, true);
-    }
+            
+            const newPaid = (d.paid || 0) + totalToPay;
+            pays.push({ amount: totalToPay, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
+            logs.push(createLog("ÜRÜN BAZLI ÖDEME", `${method} ile tahsil edildi: ${totalToPay} ₺ (${itemNames.join(', ')})`));
+            
+            await updateDoc(ref, { items: freshItems, partialPayments: pays, paid: newPaid, logs: logs });
+            await updateDoc(doc(db, "tables", currentTableId), { paidAmount: newPaid });
+            showModal('BAŞARILI', 'Seçilen ürünlerin ödemesi alındı.', '', null, true);
+        }
+    });
+
+    setTimeout(() => {
+        const checks = document.querySelectorAll('.item-pay-check');
+        const totalEl = document.getElementById('item-pay-total');
+        checks.forEach(c => {
+            c.addEventListener('change', () => {
+                let t = 0;
+                document.querySelectorAll('.item-pay-check:checked').forEach(chk => {
+                    t += parseFloat(chk.getAttribute('data-price'));
+                });
+                totalEl.textContent = t;
+            });
+        });
+    }, 100);
 });
 
 document.getElementById('close-table-btn').addEventListener('click', async () => {
     if(!currentOrderDocId) return;
-    try {
-        const ref = doc(db, "orders", currentOrderDocId);
-        const tableRef = doc(db, "tables", currentTableId);
-        const snap = await getDoc(ref);
-        const d = snap.data();
-        const remaining = (d.total || 0) - (d.paid || 0);
+    const ref = doc(db, "orders", currentOrderDocId);
+    const snap = await getDoc(ref);
+    const d = snap.data();
+    const remaining = (d.total || 0) - (d.paid || 0);
 
-        if(remaining > 0) {
-            showModal('MASAYI KAPAT', `KALAN HESAP: <b style="color:var(--accent); font-size:18px;">${remaining} ₺</b><br><br>TAHSİLAT YÖNTEMİNİ SEÇİNİZ:`, `
-                <select id="pay-method-full">
-                    <option value="Nakit">Nakit</option>
-                    <option value="Kredi Kartı">Kredi Kartı</option>
-                    <option value="Yemek Kartı">Yemek Kartı</option>
-                </select>
-            `, async (data) => {
-                try {
-                    const method = data['pay-method-full'];
-                    const pays = d.partialPayments || [];
-                    const logs = d.logs || [];
+    if(remaining > 0) {
+        showModal('MASAYI KAPAT', `KALAN HESAP: <b style="color:var(--accent); font-size:18px;">${remaining} ₺</b><br><br>TAHSİLAT YÖNTEMİNİ SEÇİNİZ:`, `
+            <select id="pay-method-full">
+                <option value="Nakit">Nakit</option>
+                <option value="Kredi Kartı">Kredi Kartı</option>
+                <option value="Yemek Kartı">Yemek Kartı</option>
+            </select>
+        `, async (data) => {
+            const method = data['pay-method-full'];
+            const pays = d.partialPayments || [];
+            const logs = d.logs || [];
 
-                    pays.push({ amount: remaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
-                    logs.push(createLog("HESAP KAPATILDI", `Kalan ${remaining} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
-                    
-                    const batch = writeBatch(db);
-                    batch.update(ref, { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
-                    batch.update(tableRef, { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
-                    await batch.commit();
-                    
-                    currentOrderDocId = null;
-                    if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
-                    switchView('tables');
-                    
-                    const dateInput = document.getElementById('history-date-filter');
-                    if (dateInput && dateInput.value) {
-                        loadFinanceForDate(dateInput.value);
-                    }
-                    
-                    showModal('BAŞARILI', 'Hesap tahsil edildi ve masa kapatıldı.', '', null, true);
-                } catch(err) {
-                    showModal('HATA', 'İşlem başarısız: ' + err.message, '', null, true);
-                }
-            });
-        } else {
-            showModal('MASAYI KAPAT', 'AÇIK HESAP BULUNMUYOR. MASA BOŞALTILACAKTIR. ONAYLIYOR MUSUNUZ?', '', async () => {
-                try {
-                    const logs = d.logs || [];
-                    logs.push(createLog("MASA KAPATILDI", `Açık hesap olmadan masa boşaltıldı.`));
-                    
-                    const batch = writeBatch(db);
-                    batch.update(ref, { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
-                    batch.update(tableRef, { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
-                    await batch.commit();
-                    
-                    currentOrderDocId = null;
-                    if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
-                    switchView('tables');
-                    
-                    const dateInput = document.getElementById('history-date-filter');
-                    if (dateInput && dateInput.value) {
-                        loadFinanceForDate(dateInput.value);
-                    }
-                    
-                    showModal('BAŞARILI', 'Masa boşaltıldı.', '', null, true);
-                } catch(err) {
-                    showModal('HATA', 'İşlem başarısız: ' + err.message, '', null, true);
-                }
-            });
-        }
-    } catch(err) {
-        showModal('HATA', 'Hesap durumu alınamadı: ' + err.message, '', null, true);
+            pays.push({ amount: remaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
+            logs.push(createLog("HESAP KAPATILDI", `Kalan ${remaining} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
+            
+            await updateDoc(ref, { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
+            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            currentOrderDocId = null;
+            if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
+            switchView('tables');
+            showModal('BAŞARILI', 'Hesap tahsil edildi ve masa kapatıldı.', '', null, true);
+        });
+    } else {
+        showModal('MASAYI KAPAT', 'AÇIK HESAP BULUNMUYOR. MASA BOŞALTILACAKTIR. ONAYLIYOR MUSUNUZ?', '', async () => {
+            const logs = d.logs || [];
+            logs.push(createLog("MASA KAPATILDI", `Açık hesap olmadan masa boşaltıldı.`));
+            await updateDoc(ref, { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
+            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            currentOrderDocId = null;
+            if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
+            switchView('tables');
+            showModal('BAŞARILI', 'Masa boşaltıldı.', '', null, true);
+        });
     }
 });
 
@@ -1372,12 +1258,11 @@ document.getElementById('print-order-btn').addEventListener('click', async () =>
     window.print();
 });
 
-async function loadStaff() {
-    const container = document.getElementById('admin-staff-list');
-    if(!container) return;
-    
-    try {
-        const snapshot = await getDocs(collection(db, "users"));
+
+function listenStaff() {
+    const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
+        const container = document.getElementById('admin-staff-list');
+        if(!container) return;
         container.innerHTML = '';
         snapshot.docs.forEach(docSnap => {
             const u = docSnap.data();
@@ -1407,9 +1292,8 @@ async function loadStaff() {
             `;
             container.appendChild(div);
         });
-    } catch(err) {
-        console.error(err);
-    }
+    });
+    globalUnsubscribes.push(unsub);
 }
 
 document.getElementById('save-staff-btn').addEventListener('click', async () => {
@@ -1430,7 +1314,6 @@ document.getElementById('save-staff-btn').addEventListener('click', async () => 
     await addDoc(collection(db, "users"), { id: genId, name: name, password: pass, role: role, status: 'active' });
     document.getElementById('new-staff-name').value = ''; document.getElementById('new-staff-pass').value = '';
     showModal('BAŞARILI', `PERSONEL EKLENDİ.<br><br><b style="font-size:24px; color:var(--accent); letter-spacing:3px; font-family:var(--font-head);">ID: ${genId}</b>`, '', null, true);
-    loadStaff();
 });
 
 window.resetStaffPass = (id) => {
@@ -1443,17 +1326,14 @@ window.resetStaffPass = (id) => {
 };
 window.toggleStaffRole = async (id, currentRole) => {
     await updateDoc(doc(db, "users", id), { role: currentRole === 'admin' ? 'waiter' : 'admin' });
-    loadStaff();
 };
 window.toggleStaffStatus = async (id, currentStatus) => {
     await updateDoc(doc(db, "users", id), { status: currentStatus === 'passive' ? 'active' : 'passive' });
-    loadStaff();
 };
 window.deleteStaff = (id) => {
     showModal('PERSONELİ SİL', 'BU PERSONELİ SİSTEMDEN KALICI OLARAK SİLMEK İSTEDİĞİNİZE EMİN MİSİNİZ?', '', async () => {
         await deleteDoc(doc(db, "users", id));
         showModal('BAŞARILI', 'Personel silindi.', '', null, true);
-        loadStaff();
     });
 };
 
@@ -1483,40 +1363,31 @@ document.getElementById('update-credentials-btn').addEventListener('click', asyn
 });
 
 document.getElementById('update-company-btn').addEventListener('click', async () => {
-    const newSettings = {
+    await updateDoc(doc(db, "settings", "global"), {
         name: document.getElementById('company-name').value,
         phone: document.getElementById('company-phone').value,
         address: document.getElementById('company-address').value,
         open: document.getElementById('company-open').value,
         close: document.getElementById('company-close').value
-    };
-    await updateDoc(doc(db, "settings", "global"), newSettings);
-    companyInfo = { ...companyInfo, ...newSettings };
-    applyGlobalSettings();
+    });
     showModal('BAŞARILI', 'AYARLAR KAYDEDİLDİ.', '', null, true);
 });
 
 document.getElementById('toggle-maintenance-btn').addEventListener('click', async () => {
     const nextState = !companyInfo.maintenance;
     await updateDoc(doc(db, "settings", "global"), { maintenance: nextState });
-    companyInfo.maintenance = nextState;
-    applyGlobalSettings();
 });
 
 document.getElementById('send-broadcast-btn').addEventListener('click', async () => {
     const msg = document.getElementById('broadcast-msg').value;
     await updateDoc(doc(db, "settings", "global"), { broadcast: msg });
-    companyInfo.broadcast = msg;
-    applyGlobalSettings();
 });
 document.getElementById('clear-broadcast-btn').addEventListener('click', async () => {
     document.getElementById('broadcast-msg').value = '';
     await updateDoc(doc(db, "settings", "global"), { broadcast: "" });
-    companyInfo.broadcast = "";
-    applyGlobalSettings();
 });
 
-document.getElementById('history-date-filter')?.addEventListener('change', (e) => {
+document.getElementById('history-date-filter').addEventListener('change', (e) => {
     loadFinanceForDate(e.target.value);
 });
 
@@ -1818,3 +1689,272 @@ window.deleteExpense = (id) => {
         if(dateInput) loadFinanceForDate(dateInput.value);
     });
 };
+
+async function loadQRCategoriesAndProducts() {
+    let globalCats = [];
+    let globalProds = [];
+
+    window.renderQR = () => {
+        const catContainer = document.getElementById('qr-categories-container');
+        const prodContainer = document.getElementById('qr-products-container');
+        if(!catContainer || !prodContainer) return;
+
+        catContainer.innerHTML = '';
+        prodContainer.innerHTML = '';
+
+        if(globalCats.length === 0) return;
+        if(!currentCategory) currentCategory = globalCats[0].name;
+
+        globalCats.forEach(c => {
+            const btn = document.createElement('button');
+            btn.className = `qr-cat-btn ${currentCategory === c.name ? 'active' : ''}`;
+            btn.textContent = c.name;
+            btn.onclick = () => { currentCategory = c.name; window.renderQR(); };
+            catContainer.appendChild(btn);
+        });
+
+        const activeProds = globalProds.filter(p => p.cat === currentCategory);
+        activeProds.forEach(p => {
+            prodContainer.innerHTML += `
+                <div class="qr-product-card" style="${!p.stock ? 'opacity:0.4;' : ''}">
+                    <div class="qr-prod-info">
+                        <div class="qr-prod-name">${p.name} ${!p.stock ? '<span style="color:var(--red); font-size:10px; font-weight:900; letter-spacing:1px; font-family:var(--font-body);">(TÜKENDİ)</span>' : ''}</div>
+                        ${p.desc ? `<div class="qr-prod-desc">${p.desc}</div>` : ''}
+                        <div class="flex-row" style="margin-top:2px;">
+                            ${p.cal ? `<span class="qr-badge">Kalori: ${p.cal}</span>` : ''}
+                            ${p.allergen ? `<span class="qr-badge" style="color:var(--accent); border-color:var(--accent);">Alerjen: ${p.allergen}</span>` : ''}
+                            ${p.vegan ? `<span class="qr-badge" style="color:var(--green); border-color:var(--green);">VEGAN</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="qr-prod-price">${p.price} ₺</div>
+                </div>
+            `;
+        });
+    };
+
+    const cachedCats = sessionStorage.getItem('twinA_qr_cats');
+    const cachedProds = sessionStorage.getItem('twinA_qr_prods');
+    const cacheTime = sessionStorage.getItem('twinA_qr_time');
+    const now = new Date().getTime();
+
+    if (cachedCats && cachedProds && cacheTime && (now - parseInt(cacheTime) < 900000)) {
+        globalCats = JSON.parse(cachedCats);
+        globalProds = JSON.parse(cachedProds);
+        window.renderQR();
+        return;
+    }
+
+    try {
+        const [catSnap, prodSnap] = await Promise.all([
+            getDocs(collection(db, "categories")),
+            getDocs(collection(db, "products"))
+        ]);
+
+        globalCats = catSnap.docs.map(d => d.data());
+        globalCats.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+
+        globalProds = prodSnap.docs.map(d => d.data());
+        globalProds.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+
+        sessionStorage.setItem('twinA_qr_cats', JSON.stringify(globalCats));
+        sessionStorage.setItem('twinA_qr_prods', JSON.stringify(globalProds));
+        sessionStorage.setItem('twinA_qr_time', now.toString());
+
+        window.renderQR();
+    } catch(e) {
+        console.error("QR Menü yüklenemedi:", e);
+    }
+}
+
+async function initDashboard() {
+    const dashTotalOrders = document.getElementById('dash-total-orders');
+    const dashTotalRev = document.getElementById('dash-total-revenue');
+    const dashBestItem = document.getElementById('dash-best-item');
+    if(!dashTotalOrders) return; 
+
+    document.getElementById('dash-range-select').addEventListener('change', (e) => {
+        if(e.target.value === 'custom') {
+            document.getElementById('dash-custom-range').style.display = 'flex';
+        } else {
+            document.getElementById('dash-custom-range').style.display = 'none';
+            applyDashboardRange(e.target.value);
+        }
+    });
+
+    document.getElementById('dash-apply-btn').addEventListener('click', () => {
+        const s = document.getElementById('dash-start-date').value;
+        const e = document.getElementById('dash-end-date').value;
+        if(s && e) {
+            updateDashboardData(s, e);
+        } else {
+            showModal('HATA', 'Lütfen başlangıç ve bitiş tarihlerini seçiniz.', '', null, true);
+        }
+    });
+
+    const select = document.getElementById('dash-range-select');
+    if(select.value !== 'custom') {
+        applyDashboardRange(select.value);
+    } else {
+        document.getElementById('dash-apply-btn').click();
+    }
+}
+
+function applyDashboardRange(val) {
+    const end = new Date();
+    const start = new Date();
+
+    if (val === 'today') {
+    } else if (val === 'yesterday') {
+        start.setDate(start.getDate() - 1);
+        end.setDate(end.getDate() - 1);
+    } else {
+        start.setDate(start.getDate() - (parseInt(val) - 1));
+    }
+    
+    updateDashboardData(toYYYYMMDD(start), toYYYYMMDD(end));
+}
+
+async function updateDashboardData(startDateStr, endDateStr) {
+    const dashTotalOrders = document.getElementById('dash-total-orders');
+    const dashTotalRev = document.getElementById('dash-total-revenue');
+    const dashBestItem = document.getElementById('dash-best-item');
+
+    const startD = new Date(`${startDateStr}T00:00:00`);
+    const endD = new Date(`${endDateStr}T23:59:59.999`);
+
+    const qOrders = query(collection(db, "orders"), 
+        where("closedAt", ">=", startD.toISOString()),
+        where("closedAt", "<=", endD.toISOString())
+    );
+
+    const snap = await getDocs(qOrders);
+    const dashOrders = snap.docs.map(d => d.data());
+
+    let totalRev = 0;
+    let totalOrders = 0;
+    let itemCounts = {};
+    let aggRevenues = {};
+
+    const diffDays = Math.floor((endD - startD) / (1000 * 60 * 60 * 24));
+    const isMonthly = diffDays > 90;
+
+    if (isMonthly) {
+        let curr = new Date(startD.getFullYear(), startD.getMonth(), 1);
+        while(curr <= endD) {
+            let mStr = `${curr.getFullYear()}-${String(curr.getMonth()+1).padStart(2,'0')}`;
+            aggRevenues[mStr] = 0;
+            curr.setMonth(curr.getMonth() + 1);
+        }
+    } else {
+        for(let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+            aggRevenues[toYYYYMMDD(new Date(d))] = 0;
+        }
+    }
+
+    dashOrders.forEach(o => {
+        const od = new Date(o.closedAt);
+        const dKey = isMonthly 
+            ? `${od.getFullYear()}-${String(od.getMonth()+1).padStart(2,'0')}`
+            : toYYYYMMDD(od);
+
+        if(aggRevenues[dKey] !== undefined) {
+            totalOrders++;
+            totalRev += o.total;
+            aggRevenues[dKey] += o.total;
+
+            (o.items || []).forEach(item => {
+                if(!item.deleted) {
+                    if(!itemCounts[item.name]) itemCounts[item.name] = 0;
+                    itemCounts[item.name]++;
+                }
+            });
+        }
+    });
+
+    dashTotalOrders.textContent = totalOrders;
+    dashTotalRev.textContent = `${totalRev} ₺`;
+
+    let sortedItems = Object.entries(itemCounts).sort((a,b) => b[1] - a[1]);
+    if(sortedItems.length > 0) {
+        dashBestItem.textContent = `${sortedItems[0][0]} (${sortedItems[0][1]} Adet)`;
+    } else {
+        dashBestItem.textContent = "Veri Yok";
+    }
+
+    let chartLabels = [];
+    if(isMonthly) {
+        chartLabels = Object.keys(aggRevenues).map(m => {
+            const [y, mo] = m.split('-'); return `${mo}/${y}`;
+        });
+    } else {
+        chartLabels = Object.keys(aggRevenues).map(d => {
+            const p = d.split('-'); return `${p[2]}.${p[1]}`;
+        });
+    }
+
+    renderCharts(chartLabels, Object.values(aggRevenues), sortedItems.slice(0,5));
+}
+
+function renderCharts(labelsRev, dataRev, topItems) {
+    const ctxRev = document.getElementById('revenueChart');
+    const ctxProd = document.getElementById('productsChart');
+
+    if(chartInstances.rev) chartInstances.rev.destroy();
+    if(chartInstances.prod) chartInstances.prod.destroy();
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const textColor = isDark ? '#F0EAD6' : '#2C2A26';
+    const gridColor = isDark ? '#2D2A26' : '#D1C9B8';
+
+    Chart.defaults.color = textColor;
+    Chart.defaults.font.family = "'Montserrat', sans-serif";
+
+    chartInstances.rev = new Chart(ctxRev, {
+        type: 'line',
+        data: {
+            labels: labelsRev,
+            datasets: [{
+                label: 'Ciro (₺)',
+                data: dataRev,
+                borderColor: '#D4AF37',
+                backgroundColor: 'rgba(212, 175, 55, 0.2)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointBackgroundColor: '#D4AF37'
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { grid: { color: gridColor } },
+                y: { grid: { color: gridColor }, beginAtZero: true }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    const labelsProd = topItems.map(i => i[0]);
+    const dataProd = topItems.map(i => i[1]);
+
+    chartInstances.prod = new Chart(ctxProd, {
+        type: 'bar',
+        data: {
+            labels: labelsProd,
+            datasets: [{
+                label: 'Satış Adedi',
+                data: dataProd,
+                backgroundColor: ['#D4AF37', '#5C7561', '#5C7A96', '#A65648', '#8A847A'],
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { grid: { display: false } },
+                y: { grid: { color: gridColor }, beginAtZero: true }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+}

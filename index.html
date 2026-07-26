@@ -8,6 +8,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <title>TWIN-A</title>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800;900&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="style.css">
     <meta name="theme-color" content="#141210">
 </head>
@@ -87,6 +88,7 @@
             <button class="nav-btn" data-target="menu-view">MENÜ</button>
             <button class="nav-btn" data-target="staff-view">PERSONEL</button>
             <button class="nav-btn" data-target="finance-view">KASA & GEÇMİŞ</button>
+            <button class="nav-btn" data-target="dashboard-view">DASHBOARD</button>
             <button class="nav-btn" data-target="settings-view">AYARLAR</button>
         </nav>
         <nav id="staff-nav" style="display: none;">
@@ -261,63 +263,109 @@
                 </div>
             </main>
 
+            <main id="dashboard-view" class="view" style="display: none;">
+                <div class="finance-layout">
+                    <div class="flex-row" style="justify-content:space-between; align-items:center; border-bottom:2px dashed var(--border); padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap;">
+                        <h3 style="font-size:22px; color:var(--accent); font-family:var(--font-head); letter-spacing:4px; margin:0; border:none; padding:0;">GÖRSEL ANALİTİK</h3>
+                        <div class="flex-row" style="gap:15px;">
+                            <select id="dash-range-select" style="padding:10px 15px; font-size:12px; width:auto; border-radius:6px; cursor:pointer;">
+                                <option value="today">Bugün</option>
+                                <option value="yesterday">Dün</option>
+                                <option value="7" selected>Son 7 Gün</option>
+                                <option value="14">Son 14 Gün</option>
+                                <option value="30">Son 30 Gün</option>
+                                <option value="60">Son 60 Gün</option>
+                                <option value="90">Son 90 Gün</option>
+                                <option value="365">Son 1 Yıl</option>
+                                <option value="custom">Özel Tarih Belirle</option>
+                            </select>
+                            <div id="dash-custom-range" class="flex-row" style="display:none; gap:10px;">
+                                <input type="date" id="dash-start-date" style="padding:10px; font-size:12px; width:auto; border-radius:6px;">
+                                <span style="color:var(--gray); font-weight:900;">-</span>
+                                <input type="date" id="dash-end-date" style="padding:10px; font-size:12px; width:auto; border-radius:6px;">
+                                <button id="dash-apply-btn" class="btn-accent" style="padding:10px 20px; font-size:11px;">UYGULA</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="finance-header-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                        <div class="finance-card">
+                            <h4 style="font-size:11px;">TOPLAM SİPARİŞ</h4>
+                            <span id="dash-total-orders">0</span>
+                        </div>
+                        <div class="finance-card">
+                            <h4 style="font-size:11px;">TOPLAM CİRO</h4>
+                            <span id="dash-total-revenue">0 ₺</span>
+                        </div>
+                        <div class="finance-card">
+                            <h4 style="font-size:11px;">EN ÇOK SATAN ÜRÜN</h4>
+                            <span id="dash-best-item" style="font-size:18px;">Yükleniyor...</span>
+                        </div>
+                    </div>
+                    <div class="finance-split" style="grid-template-columns: 1fr 1fr;">
+                        <div class="history-section" style="padding:25px;">
+                            <h4 style="font-size:13px; color:var(--gray); margin-bottom:20px; letter-spacing:1px; border-bottom:1px solid var(--border); padding-bottom:10px;">CİRO GRAFİĞİ</h4>
+                            <canvas id="revenueChart"></canvas>
+                        </div>
+                        <div class="history-section" style="padding:25px;">
+                            <h4 style="font-size:13px; color:var(--gray); margin-bottom:20px; letter-spacing:1px; border-bottom:1px solid var(--border); padding-bottom:10px;">EN ÇOK SATAN 5 ÜRÜN</h4>
+                            <canvas id="productsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
             <main id="settings-view" class="view" style="display: none;">
                 <div class="admin-panel-layout">
                     
-                    <div class="flex-col" style="gap:20px; flex:1; min-width:300px;">
-                        <div class="add-form">
-                            <h3>FİRMA & SİSTEM AYARLARI</h3>
-                            <p style="font-size:10px; color:var(--gray); margin-bottom:8px;">(Bu bilgiler Adisyon ve Z-Raporunda yer alacaktır)</p>
-                            <input type="text" id="company-name" placeholder="Firma İsmi">
-                            <input type="text" id="company-phone" placeholder="Telefon Numarası">
-                            <textarea id="company-address" placeholder="Açık Adres" rows="2"></textarea>
-                            <div class="flex-row">
-                                <div style="flex:1;">
-                                    <label style="font-weight:900; font-size:9px; color:var(--gray); margin-bottom:4px; display:block;">AÇILIŞ SAATİ</label>
-                                    <input type="time" id="company-open">
-                                </div>
-                                <div style="flex:1;">
-                                    <label style="font-weight:900; font-size:9px; color:var(--gray); margin-bottom:4px; display:block;">KAPANIŞ SAATİ</label>
-                                    <input type="time" id="company-close">
-                                </div>
-                            </div>
-                            <button id="update-company-btn" class="btn-green" style="padding:10px; font-size:11px;">AYARLARI KAYDET</button>
-                        </div>
-
-                        <div class="add-form">
-                            <h3>KENDİ BİLGİLERİMİ GÜNCELLE</h3>
-                            <input type="text" id="admin-new-id" placeholder="Yeni ID / İsim">
-                            <input type="password" id="admin-new-pass" placeholder="Yeni Şifre">
-                            <button id="update-credentials-btn" class="btn-confirm" style="padding:10px; font-size:10px;">BİLGİLERİ GÜNCELLE</button>
+                    <div class="add-form">
+                        <h3>MASA YÖNETİMİ</h3>
+                        <p style="font-size:10px; color:var(--gray); margin-bottom:10px; line-height:1.4;">Sistemdeki masa sayısını arttırıp azaltabilirsiniz. Sayıyı düşürdüğünüzde en sondaki boş masalar silinir.</p>
+                        <div class="flex-row">
+                            <input type="number" id="table-count-input" placeholder="Masa Sayısı" min="1" style="flex:1;">
+                            <button id="update-table-count-btn" class="btn-confirm" style="padding:10px 12px; height: 100%;">GÜNCELLE</button>
                         </div>
                     </div>
 
-                    <div class="flex-col" style="gap:20px; flex:1; min-width:300px;">
-                        <div class="add-form">
-                            <h3>MASA YÖNETİMİ</h3>
-                            <p style="font-size:10px; color:var(--gray); margin-bottom:10px; line-height:1.4;">Sistemdeki masa sayısını arttırıp azaltabilirsiniz. Sayıyı düşürdüğünüzde en sondaki boş masalar silinir.</p>
-                            <div class="flex-row">
-                                <input type="number" id="table-count-input" placeholder="Masa Sayısı" min="1" style="flex:1;">
-                                <button id="update-table-count-btn" class="btn-confirm" style="padding:10px 12px; height: 100%;">GÜNCELLE</button>
-                            </div>
-                        </div>
-
-                        <div class="add-form">
-                            <h3>PERSONELE DUYURU YAYINLA</h3>
-                            <textarea id="broadcast-msg" placeholder="Tüm sistemlerde üstte görünecek mesajı yazın..." rows="3"></textarea>
-                            <button id="send-broadcast-btn" class="btn-blue" style="padding:10px; font-size:10px;">DUYURUYU YAYINLA</button>
-                            <button id="clear-broadcast-btn" class="btn-cancel" style="margin-top:6px; padding:10px; font-size:10px;">DUYURUYU KALDIR</button>
+                    <div class="add-form">
+                        <h3>BAKIM MODU</h3>
+                        <div style="background:var(--hover-bg); padding:15px; border-radius:6px; border:1px solid var(--border);">
+                            <p style="font-size:11px; color:var(--gray); margin-bottom:10px; font-weight:700; line-height:1.4;">Sistemi bakıma alırsanız garsonlar ve QR menüye giren müşteriler bakım ekranı görürler.</p>
+                            <button id="toggle-maintenance-btn" class="btn-cancel" style="width:100%; padding:10px; font-size:11px; letter-spacing:1px;"></button>
                         </div>
                     </div>
-
-                    <div class="flex-col" style="gap:20px; flex:1; min-width:300px;">
-                        <div class="add-form">
-                            <h3>BAKIM MODU</h3>
-                            <div style="background:var(--hover-bg); padding:15px; border-radius:6px; border:1px solid var(--border);">
-                                <p style="font-size:11px; color:var(--gray); margin-bottom:10px; font-weight:700; line-height:1.4;">Sistemi bakıma alırsanız garsonlar ve QR menüye giren müşteriler bakım ekranı görürler.</p>
-                                <button id="toggle-maintenance-btn" class="btn-cancel" style="width:100%; padding:10px; font-size:11px; letter-spacing:1px;"></button>
+                    
+                    <div class="add-form">
+                        <h3>FİRMA & SİSTEM AYARLARI</h3>
+                        <p style="font-size:10px; color:var(--gray); margin-bottom:8px;">(Bu bilgiler Adisyon ve Z-Raporunda yer alacaktır)</p>
+                        <input type="text" id="company-name" placeholder="Firma İsmi">
+                        <input type="text" id="company-phone" placeholder="Telefon Numarası">
+                        <textarea id="company-address" placeholder="Açık Adres" rows="2"></textarea>
+                        <div class="flex-row">
+                            <div style="flex:1;">
+                                <label style="font-weight:900; font-size:9px; color:var(--gray); margin-bottom:4px; display:block;">AÇILIŞ SAATİ</label>
+                                <input type="time" id="company-open">
+                            </div>
+                            <div style="flex:1;">
+                                <label style="font-weight:900; font-size:9px; color:var(--gray); margin-bottom:4px; display:block;">KAPANIŞ SAATİ</label>
+                                <input type="time" id="company-close">
                             </div>
                         </div>
+                        <button id="update-company-btn" class="btn-green" style="padding:10px; font-size:11px;">AYARLARI KAYDET</button>
+                    </div>
+
+                    <div class="add-form">
+                        <h3>PERSONELE DUYURU YAYINLA</h3>
+                        <textarea id="broadcast-msg" placeholder="Tüm sistemlerde üstte görünecek mesajı yazın..." rows="3"></textarea>
+                        <button id="send-broadcast-btn" class="btn-blue" style="padding:10px; font-size:10px;">DUYURUYU YAYINLA</button>
+                        <button id="clear-broadcast-btn" class="btn-cancel" style="margin-top:6px; padding:10px; font-size:10px;">DUYURUYU KALDIR</button>
+                    </div>
+
+                    <div class="add-form">
+                        <h3>KENDİ BİLGİLERİMİ GÜNCELLE</h3>
+                        <input type="text" id="admin-new-id" placeholder="Yeni ID / İsim">
+                        <input type="password" id="admin-new-pass" placeholder="Yeni Şifre">
+                        <button id="update-credentials-btn" class="btn-confirm" style="padding:10px; font-size:10px;">BİLGİLERİ GÜNCELLE</button>
                     </div>
 
                 </div>
