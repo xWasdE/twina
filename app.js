@@ -36,6 +36,10 @@ const urlParams = new URLSearchParams(window.location.search);
 const isQRMode = urlParams.get('qr') === '1';
 const expectedHash = window.location.hash || '';
 
+
+const maintBtn = document.getElementById('maintenance-admin-login-btn');
+if (maintBtn) maintBtn.textContent = "ANA SAYFAYA DÖN";
+
 window.toggleTheme = () => {
     const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
@@ -205,7 +209,6 @@ async function bootSystem() {
     loginScreen.classList.add('active');
 }
 
-
 function applyGlobalSettings() {
     document.getElementById('header-company-name').textContent = companyInfo.name || 'TWIN-A';
     document.getElementById('company-name').value = companyInfo.name || '';
@@ -253,13 +256,15 @@ function applyGlobalSettings() {
     }
 }
 
-document.getElementById('maintenance-admin-login-btn').addEventListener('click', () => {
-    isMaintenanceEnforced = false;
-    hideAllScreens();
-    const loginScreen = document.getElementById('login-screen');
-    loginScreen.style.display = 'flex';
-    loginScreen.classList.add('active');
-});
+if(document.getElementById('maintenance-admin-login-btn')) {
+    document.getElementById('maintenance-admin-login-btn').addEventListener('click', () => {
+        isMaintenanceEnforced = false;
+        hideAllScreens();
+        const loginScreen = document.getElementById('login-screen');
+        loginScreen.style.display = 'flex';
+        loginScreen.classList.add('active');
+    });
+}
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bootSystem);
@@ -317,7 +322,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     }
 });
 
-async function startApp() {
+function startApp() {
     hideAllScreens();
     const mainApp = document.getElementById('main-app');
     mainApp.style.display = 'flex';
@@ -332,14 +337,14 @@ async function startApp() {
         document.getElementById('staff-nav').style.display = 'flex';
     }
 
-    try {
-        const snap = await getDocs(collection(db, "tables"));
+    
+    getDocs(collection(db, "tables")).then(snap => {
         if (snap.empty) {
             for (let i = 1; i <= 28; i++) {
-                await setDoc(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '' });
+                setDoc(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '' });
             }
         }
-    } catch(e){}
+    }).catch(e => console.error(e));
 
     switchView('tables');
     listenTables();
@@ -348,11 +353,10 @@ async function startApp() {
     if(currentUser.role === 'admin') { 
         listenStaff(); 
         
-        
         const dateInput = document.getElementById('history-date-filter');
         if(dateInput) {
             dateInput.value = toYYYYMMDD(new Date()); 
-            loadFinanceForDate(dateInput.value);
+            loadFinanceForDate(dateInput.value); 
         }
         
         const sDate = document.getElementById('dash-start-date');
@@ -659,7 +663,7 @@ function openOrderView(tableName, orderId) {
 
 document.getElementById('back-to-tables').addEventListener('click', () => {
     currentOrderDocId = null;
-    if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
+    if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; } 
     switchView('tables');
 });
 
@@ -1254,6 +1258,7 @@ document.getElementById('print-order-btn').addEventListener('click', async () =>
     window.print();
 });
 
+
 function listenStaff() {
     const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
         const container = document.getElementById('admin-staff-list');
@@ -1263,16 +1268,26 @@ function listenStaff() {
             const u = docSnap.data();
             const div = document.createElement('div');
             div.className = `admin-list-item ${u.status === 'passive' ? 'passive' : ''}`;
+            
+            let actionsHtml = `<button class="action-btn btn-blue" onclick="resetStaffPass('${docSnap.id}')">ŞİFRE</button>`;
+            
+            if (docSnap.id === currentUser.docId) {
+                actionsHtml += `<span style="color:var(--accent); font-size:10px; font-weight:900; margin-left:10px;">(BU SENSİN)</span>`;
+            } else {
+                actionsHtml += `
+                    <button class="action-btn btn-confirm" onclick="toggleStaffRole('${docSnap.id}', '${u.role}')">${u.role === 'admin' ? 'GARSON YAP' : 'ADMİN YAP'}</button>
+                    <button class="action-btn btn-cancel" onclick="toggleStaffStatus('${docSnap.id}', '${u.status}')">${u.status === 'passive' ? 'AKTİFLEŞTİR' : 'PASİFE AL'}</button>
+                    <button class="action-btn btn-red" onclick="deleteStaff('${docSnap.id}')">SİL</button>
+                `;
+            }
+
             div.innerHTML = `
                 <div class="info">
                     <strong>${u.name} ${u.status === 'passive' ? '<span style="color:var(--red); font-size:10px;">(PASİF)</span>' : ''}</strong>
                     <span style="color:var(--gray); font-size:11px; font-weight:800; letter-spacing:1px;">ROL: ${u.role === 'admin' ? 'YÖNETİCİ' : 'GARSON'} | İSİM: ${u.id || u.name}</span>
                 </div>
                 <div class="admin-actions">
-                    <button class="action-btn btn-blue" onclick="resetStaffPass('${docSnap.id}')">ŞİFRE</button>
-                    <button class="action-btn btn-confirm" onclick="toggleStaffRole('${docSnap.id}', '${u.role}')">${u.role === 'admin' ? 'GARSON YAP' : 'ADMİN YAP'}</button>
-                    <button class="action-btn btn-cancel" onclick="toggleStaffStatus('${docSnap.id}', '${u.status}')">${u.status === 'passive' ? 'AKTİFLEŞTİR' : 'PASİFE AL'}</button>
-                    <button class="action-btn btn-red" onclick="deleteStaff('${docSnap.id}')">SİL</button>
+                    ${actionsHtml}
                 </div>
             `;
             container.appendChild(div);
@@ -1372,7 +1387,6 @@ document.getElementById('clear-broadcast-btn').addEventListener('click', async (
     await updateDoc(doc(db, "settings", "global"), { broadcast: "" });
 });
 
-
 document.getElementById('history-date-filter').addEventListener('change', (e) => {
     loadFinanceForDate(e.target.value);
 });
@@ -1384,13 +1398,11 @@ async function loadFinanceForDate(dateStr) {
     const startD = new Date(`${y}-${m}-${d}T00:00:00`);
     const endD = new Date(`${y}-${m}-${d}T23:59:59.999`);
 
-    
     const qOrders = query(collection(db, "orders"), 
         where("closedAt", ">=", startD.toISOString()),
         where("closedAt", "<=", endD.toISOString())
     );
 
-    
     const qExpenses = query(collection(db, "expenses"), 
         where("time", ">=", startD.toISOString()),
         where("time", "<=", endD.toISOString())
@@ -1662,7 +1674,6 @@ document.getElementById('save-expense-btn').addEventListener('click', async () =
             await addDoc(collection(db, "expenses"), { amount: amt, desc: desc, user: currentUser ? currentUser.name : 'Bilinmeyen', time: new Date().toISOString() });
             document.getElementById('expense-amount').value = ''; document.getElementById('expense-desc').value = '';
             
-            
             const dateInput = document.getElementById('history-date-filter');
             if(dateInput) loadFinanceForDate(dateInput.value);
         }
@@ -1678,7 +1689,6 @@ window.deleteExpense = (id) => {
         if(dateInput) loadFinanceForDate(dateInput.value);
     });
 };
-
 
 async function loadQRCategoriesAndProducts() {
     let globalCats = [];
@@ -1727,7 +1737,6 @@ async function loadQRCategoriesAndProducts() {
     const cacheTime = sessionStorage.getItem('twinA_qr_time');
     const now = new Date().getTime();
 
-    
     if (cachedCats && cachedProds && cacheTime && (now - parseInt(cacheTime) < 900000)) {
         globalCats = JSON.parse(cachedCats);
         globalProds = JSON.parse(cachedProds);
@@ -1735,7 +1744,6 @@ async function loadQRCategoriesAndProducts() {
         return;
     }
 
-    
     try {
         const [catSnap, prodSnap] = await Promise.all([
             getDocs(collection(db, "categories")),
@@ -1805,7 +1813,6 @@ function applyDashboardRange(val) {
     
     updateDashboardData(toYYYYMMDD(start), toYYYYMMDD(end));
 }
-
 
 async function updateDashboardData(startDateStr, endDateStr) {
     const dashTotalOrders = document.getElementById('dash-total-orders');
