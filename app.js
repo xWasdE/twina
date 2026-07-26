@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, collection, getDocs, getDoc, setDoc, updateDoc, doc, onSnapshot, query, where, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, getDoc, setDoc, updateDoc, doc, onSnapshot, query, where, addDoc, deleteDoc, writeBatch, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyDzTVIzmntO7ohuHxYYexXRi-vtPk_WCeY",
@@ -170,12 +170,27 @@ async function bootSystem() {
         return;
     }
 
+    const settingsSnap = await getDoc(doc(db, "settings", "global"));
+    if (settingsSnap.exists()) {
+        companyInfo = settingsSnap.data();
+    } else {
+        await setDoc(doc(db, "settings", "global"), companyInfo);
+    }
+
     onSnapshot(doc(db, "settings", "global"), (snap) => {
         if (snap.exists()) {
-            companyInfo = snap.data();
+            const newSettings = snap.data();
+            const menuVersionChanged = newSettings.menuVersion !== companyInfo.menuVersion;
+            companyInfo = newSettings;
             applyGlobalSettings();
-        } else {
-            setDoc(doc(db, "settings", "global"), companyInfo);
+            
+            if (menuVersionChanged) {
+                const localVersion = localStorage.getItem('twinA_menu_version');
+                if (localVersion && localVersion !== companyInfo.menuVersion) {
+                    if (isQRMode) loadQRCategoriesAndProducts();
+                    else if (currentUser) fetchMenuData();
+                }
+            }
         }
     });
 
@@ -184,6 +199,7 @@ async function bootSystem() {
         const qrScreen = document.getElementById('qr-menu-app');
         qrScreen.style.display = 'flex';
         qrScreen.classList.add('active');
+        applyGlobalSettings();
         loadQRCategoriesAndProducts();
         return;
     }
@@ -196,6 +212,7 @@ async function bootSystem() {
                 const data = docSnap.data();
                 if(data.status !== 'passive') {
                     currentUser = { ...data, docId: docSnap.id };
+                    applyGlobalSettings();
                     startApp();
                     return;
                 }
@@ -203,6 +220,7 @@ async function bootSystem() {
         } catch(e) { console.error(e); }
     }
     
+    applyGlobalSettings();
     hideAllScreens();
     const loginScreen = document.getElementById('login-screen');
     loginScreen.style.display = 'flex';
@@ -257,7 +275,7 @@ function applyGlobalSettings() {
 
     const localVersion = localStorage.getItem('twinA_menu_version');
     const remoteVersion = companyInfo.menuVersion || '1';
-    if(localVersion !== remoteVersion) {
+    if(localVersion && localVersion !== remoteVersion) {
         if(isQRMode) {
             loadQRCategoriesAndProducts();
         } else if (currentUser) {
@@ -497,10 +515,13 @@ document.getElementById('update-table-count-btn')?.addEventListener('click', asy
     
     const currentCount = existingTables.length > 0 ? existingTables[existingTables.length - 1].num : 0;
     
+    const batch = writeBatch(db);
+
     if (targetCount > currentCount) {
         for(let i = currentCount + 1; i <= targetCount; i++) {
-            await setDoc(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
         }
+        await batch.commit();
         showModal('BAŞARILI', `Masa sayısı ${targetCount} olarak güncellendi.`, '', null, true);
     } else if (targetCount < currentCount) {
         let canDelete = true;
@@ -516,8 +537,9 @@ document.getElementById('update-table-count-btn')?.addEventListener('click', asy
             return;
         }
         for(let i = targetCount + 1; i <= currentCount; i++) {
-            await deleteDoc(doc(db, "tables", `MASA ${i}`));
+            batch.delete(doc(db, "tables", `MASA ${i}`));
         }
+        await batch.commit();
         showModal('BAŞARILI', `Masa sayısı ${targetCount} olarak düşürüldü.`, '', null, true);
     } else {
         showModal('BİLGİ', 'Masa sayısı zaten aynı.', '', null, true);
@@ -561,16 +583,20 @@ document.getElementById('transfer-table-btn').addEventListener('click', async ()
         const currentOrderSnap = await getDoc(doc(db, "orders", currentOrderDocId));
         const orderData = currentOrderSnap.data();
 
+        const batch = writeBatch(db);
+
         if(targetData.status === 'empty') {
-            await updateDoc(doc(db, "orders", currentOrderDocId), { 
+            batch.update(doc(db, "orders", currentOrderDocId), { 
                 tableId: targetId, 
                 logs: [...(orderData.logs||[]), createLog("Masa Taşındı", `${currentTableId} -> ${targetId}`)] 
             });
-            await updateDoc(doc(db, "tables", targetId), { 
+            batch.update(doc(db, "tables", targetId), { 
                 status: 'active', currentOrderId: currentOrderDocId, totalAmount: orderData.total, paidAmount: orderData.paid, timestamp: new Date().toISOString() 
             });
-            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
+            batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
             
+            await batch.commit();
+
             showModal('BAŞARILI', 'Masa başarıyla taşındı.', '', null, true);
             currentOrderDocId = null;
             switchView('tables');
@@ -585,13 +611,15 @@ document.getElementById('transfer-table-btn').addEventListener('click', async ()
             const mergedTotal = (targetOrderData.total||0) + (orderData.total||0);
             const mergedPaid = (targetOrderData.paid||0) + (orderData.paid||0);
 
-            await updateDoc(doc(db, "orders", targetData.currentOrderId), {
+            batch.update(doc(db, "orders", targetData.currentOrderId), {
                 items: mergedItems, partialPayments: mergedPayments, total: mergedTotal, paid: mergedPaid, logs: mergedLogs
             });
-            await updateDoc(doc(db, "tables", targetId), { totalAmount: mergedTotal, paidAmount: mergedPaid });
+            batch.update(doc(db, "tables", targetId), { totalAmount: mergedTotal, paidAmount: mergedPaid });
             
-            await updateDoc(doc(db, "orders", currentOrderDocId), { status: 'merged_deleted' });
-            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
+            batch.update(doc(db, "orders", currentOrderDocId), { status: 'merged_deleted' });
+            batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
+
+            await batch.commit();
 
             showModal('BAŞARILI', 'Adisyonlar başarıyla birleştirildi.', '', null, true);
             currentOrderDocId = null;
@@ -654,11 +682,14 @@ async function createNewOrder(tableName) {
     const orderRef = doc(db, "orders", orderId);
     const ts = new Date().toISOString();
     
-    await setDoc(orderRef, {
+    const batch = writeBatch(db);
+    batch.set(orderRef, {
         tableId: tableName, status: 'open', items: [], partialPayments: [], paid: 0, total: 0, 
         createdAt: ts, creator: currentUser.name, logs: [createLog("Masa Açıldı", `${tableName} siparişe açıldı.`)]
     });
-    await updateDoc(doc(db, "tables", tableName), { status: 'active', currentOrderId: orderId, reservedName: '', totalAmount: 0, paidAmount: 0, timestamp: ts });
+    batch.update(doc(db, "tables", tableName), { status: 'active', currentOrderId: orderId, reservedName: '', totalAmount: 0, paidAmount: 0, timestamp: ts });
+    
+    await batch.commit();
     openOrderView(tableName, orderId);
 }
 
@@ -675,10 +706,6 @@ document.getElementById('back-to-tables').addEventListener('click', () => {
     if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; } 
     switchView('tables');
 });
-
-async function bumpMenuVersion() {
-    await updateDoc(doc(db, "settings", "global"), { menuVersion: Date.now().toString() });
-}
 
 async function fetchMenuData() {
     const [catSnap, prodSnap] = await Promise.all([
@@ -769,10 +796,14 @@ document.getElementById('add-category-btn').addEventListener('click', async () =
     const order = orderVal !== '' ? parseInt(orderVal) : ''; 
     
     if(name) {
-        await addDoc(collection(db, "categories"), { name: name, order: order });
+        const docRef = await addDoc(collection(db, "categories"), { name: name, order: order });
+        globalCategoriesList.push({ id: docRef.id, name: name, order: order });
+        globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+        renderCategoriesUI();
+        
         document.getElementById('cat-name').value = '';
         document.getElementById('cat-order').value = '';
-        showModal('BAŞARILI', 'Kategori eklendi.', '', null, true);
+        showModal('BAŞARILI', 'Kategori eklendi. (Tüm cihazlara yansıtmak için Ayarlar > Menüyü Güncelle butonuna basmayı unutmayın.)', '', null, true);
     }
 });
 
@@ -805,20 +836,33 @@ document.getElementById('update-cat-btn').addEventListener('click', async () => 
     
     await updateDoc(doc(db, "categories", catId), { name: newName, order: newOrder });
     
+    const catIndex = globalCategoriesList.findIndex(c => c.id === catId);
+    if(catIndex !== -1) {
+        globalCategoriesList[catIndex].name = newName;
+        globalCategoriesList[catIndex].order = newOrder;
+        globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+    }
+
     if(oldName !== newName) {
         const q = query(collection(db, "products"), where("cat", "==", oldName));
         const snap = await getDocs(q);
-        const updatePromises = [];
+        const batch = writeBatch(db);
         snap.forEach((d) => {
-            updatePromises.push(updateDoc(doc(db, "products", d.id), { cat: newName }));
+            batch.update(doc(db, "products", d.id), { cat: newName });
         });
-        await Promise.all(updatePromises);
+        await batch.commit();
+        
+        globalProductsList.forEach(p => {
+            if(p.cat === oldName) p.cat = newName;
+        });
+        renderProductsUI();
     }
     
+    renderCategoriesUI();
     document.getElementById('edit-cat-select').value = '';
     document.getElementById('edit-cat-name').value = '';
     document.getElementById('edit-cat-order').value = '';
-    showModal('BAŞARILI', 'Kategori güncellendi.', '', null, true);
+    showModal('BAŞARILI', 'Kategori güncellendi. (Tüm cihazlara yansıtmak için Ayarlar > Menüyü Güncelle butonuna basmayı unutmayın.)', '', null, true);
 });
 
 document.getElementById('delete-cat-btn').addEventListener('click', () => {
@@ -829,10 +873,13 @@ document.getElementById('delete-cat-btn').addEventListener('click', () => {
     }
     showModal('KATEGORİ SİL', 'Bu kategoriyi silerseniz içindeki ürünler MENÜDE GÖRÜNMEZ. Emin misiniz?', '', async () => {
         await deleteDoc(doc(db, "categories", catId));
+        globalCategoriesList = globalCategoriesList.filter(c => c.id !== catId);
+        renderCategoriesUI();
+        
         document.getElementById('edit-cat-select').value = '';
         document.getElementById('edit-cat-name').value = '';
         document.getElementById('edit-cat-order').value = '';
-        showModal('BAŞARILI', 'Kategori silindi.', '', null, true);
+        showModal('BAŞARILI', 'Kategori silindi. (Güncelleme butonuna basmayı unutmayın.)', '', null, true);
     });
 });
 
@@ -910,11 +957,17 @@ function renderProductsUI() {
 
 window.toggleStock = async (id, state) => { 
     await updateDoc(doc(db, "products", id), { stock: state }); 
+    const index = globalProductsList.findIndex(p => p.id === id);
+    if(index !== -1) globalProductsList[index].stock = state;
+    renderProductsUI();
 };
+
 window.deleteProduct = (id) => {
     showModal('ÜRÜNÜ SİL', 'BU ÜRÜNÜ SİLMEK İSTEDİĞİNİZE EMİN MİSİNİZ?', '', async () => { 
         await deleteDoc(doc(db, "products", id)); 
-        showModal('BAŞARILI', 'Ürün silindi.', '', null, true);
+        globalProductsList = globalProductsList.filter(p => p.id !== id);
+        renderProductsUI();
+        showModal('BAŞARILI', 'Ürün silindi. (Güncelleme butonuna basmayı unutmayın.)', '', null, true);
     });
 };
 
@@ -966,10 +1019,17 @@ document.getElementById('save-product-btn').addEventListener('click', async () =
     if(data.name && data.price) {
         if(editingProductId) {
             await updateDoc(doc(db, "products", editingProductId), data);
-            showModal('BAŞARILI', 'Ürün güncellendi.', '', null, true);
+            const index = globalProductsList.findIndex(p => p.id === editingProductId);
+            if(index !== -1) globalProductsList[index] = { id: editingProductId, ...data };
+            globalProductsList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+            renderProductsUI();
+            showModal('BAŞARILI', 'Ürün güncellendi. (Tüm cihazlara yansıtmak için Ayarlar > Menüyü Güncelle butonuna basmayı unutmayın.)', '', null, true);
         } else {
-            await addDoc(collection(db, "products"), data);
-            showModal('BAŞARILI', 'Ürün eklendi.', '', null, true);
+            const docRef = await addDoc(collection(db, "products"), data);
+            globalProductsList.push({ id: docRef.id, ...data });
+            globalProductsList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+            renderProductsUI();
+            showModal('BAŞARILI', 'Ürün eklendi. (Tüm cihazlara yansıtmak için Ayarlar > Menüyü Güncelle butonuna basmayı unutmayın.)', '', null, true);
         }
         document.getElementById('cancel-edit-btn').click();
     }
@@ -1043,10 +1103,10 @@ async function addItemToOrder(product) {
     
     const newTotal = (data.total || 0) + product.price;
     
-    await Promise.all([
-        updateDoc(orderRef, { items: items, logs: logs, total: newTotal }),
-        updateDoc(doc(db, "tables", currentTableId), { totalAmount: newTotal })
-    ]);
+    const batch = writeBatch(db);
+    batch.update(orderRef, { items: items, logs: logs, total: newTotal });
+    batch.update(doc(db, "tables", currentTableId), { totalAmount: newTotal });
+    await batch.commit();
 }
 
 window.deleteOrderItem = async (index) => {
@@ -1065,10 +1125,10 @@ window.deleteOrderItem = async (index) => {
         
         logs.push(createLog("ÜRÜN İPTALİ", `1x ${items[index].name} listeden çıkarıldı.`));
         
-        await Promise.all([
-            updateDoc(orderRef, { items: items, logs: logs, total: newTotal }),
-            updateDoc(doc(db, "tables", currentTableId), { totalAmount: newTotal })
-        ]);
+        const batch = writeBatch(db);
+        batch.update(orderRef, { items: items, logs: logs, total: newTotal });
+        batch.update(doc(db, "tables", currentTableId), { totalAmount: newTotal });
+        await batch.commit();
     }
 };
 
@@ -1109,8 +1169,11 @@ document.getElementById('partial-pay-btn').addEventListener('click', () => {
             pays.push({ amount: amt, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
             logs.push(createLog("ÖDEME ALINDI", `${method} ile tahsilat yapıldı: ${amt} ₺`));
             
-            await updateDoc(ref, { partialPayments: pays, paid: newPaid, logs: logs });
-            await updateDoc(doc(db, "tables", currentTableId), { paidAmount: newPaid });
+            const batch = writeBatch(db);
+            batch.update(ref, { partialPayments: pays, paid: newPaid, logs: logs });
+            batch.update(doc(db, "tables", currentTableId), { paidAmount: newPaid });
+            await batch.commit();
+
             showModal('BAŞARILI', 'Kısmi ödeme kaydedildi.', '', null, true);
         }
     });
@@ -1181,8 +1244,11 @@ document.getElementById('item-pay-btn').addEventListener('click', async () => {
             pays.push({ amount: totalToPay, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
             logs.push(createLog("ÜRÜN BAZLI ÖDEME", `${method} ile tahsil edildi: ${totalToPay} ₺ (${itemNames.join(', ')})`));
             
-            await updateDoc(ref, { items: freshItems, partialPayments: pays, paid: newPaid, logs: logs });
-            await updateDoc(doc(db, "tables", currentTableId), { paidAmount: newPaid });
+            const batch = writeBatch(db);
+            batch.update(ref, { items: freshItems, partialPayments: pays, paid: newPaid, logs: logs });
+            batch.update(doc(db, "tables", currentTableId), { paidAmount: newPaid });
+            await batch.commit();
+
             showModal('BAŞARILI', 'Seçilen ürünlerin ödemesi alındı.', '', null, true);
         }
     });
@@ -1224,8 +1290,20 @@ document.getElementById('close-table-btn').addEventListener('click', async () =>
             pays.push({ amount: remaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
             logs.push(createLog("HESAP KAPATILDI", `Kalan ${remaining} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
             
-            await updateDoc(ref, { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
-            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            let itemCounts = {};
+            (d.items || []).forEach(item => {
+                if(!item.deleted) itemCounts[item.name] = (itemCounts[item.name] || 0) + 1;
+            });
+            const statsRef = doc(db, "stats", toYYYYMMDD(new Date()));
+            let statsUpdate = { totalRevenue: increment(d.total), orderCount: increment(1) };
+            Object.entries(itemCounts).forEach(([k, v]) => { statsUpdate[`items.${k}`] = increment(v); });
+
+            const batch = writeBatch(db);
+            batch.update(ref, { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
+            batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            batch.set(statsRef, statsUpdate, { merge: true });
+            await batch.commit();
+
             currentOrderDocId = null;
             if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
             switchView('tables');
@@ -1241,8 +1319,21 @@ document.getElementById('close-table-btn').addEventListener('click', async () =>
         showModal('MASAYI KAPAT', 'AÇIK HESAP BULUNMUYOR. MASA BOŞALTILACAKTIR. ONAYLIYOR MUSUNUZ?', '', async () => {
             const logs = d.logs || [];
             logs.push(createLog("MASA KAPATILDI", `Açık hesap olmadan masa boşaltıldı.`));
-            await updateDoc(ref, { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
-            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            
+            let itemCounts = {};
+            (d.items || []).forEach(item => {
+                if(!item.deleted) itemCounts[item.name] = (itemCounts[item.name] || 0) + 1;
+            });
+            const statsRef = doc(db, "stats", toYYYYMMDD(new Date()));
+            let statsUpdate = { totalRevenue: increment(d.total), orderCount: increment(1) };
+            Object.entries(itemCounts).forEach(([k, v]) => { statsUpdate[`items.${k}`] = increment(v); });
+
+            const batch = writeBatch(db);
+            batch.update(ref, { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
+            batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            batch.set(statsRef, statsUpdate, { merge: true });
+            await batch.commit();
+
             currentOrderDocId = null;
             if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
             switchView('tables');
@@ -1434,7 +1525,7 @@ document.getElementById('clear-broadcast-btn').addEventListener('click', async (
 });
 
 document.getElementById('force-menu-update-btn')?.addEventListener('click', async () => {
-    await bumpMenuVersion();
+    await updateDoc(doc(db, "settings", "global"), { menuVersion: Date.now().toString() });
     showModal('BAŞARILI', 'Menü tüm cihazlar (Garsonlar ve QR) için güncellendi.', '', null, true);
 });
 
@@ -1871,77 +1962,79 @@ async function updateDashboardData(startDateStr, endDateStr) {
     const startD = new Date(`${startDateStr}T00:00:00`);
     const endD = new Date(`${endDateStr}T23:59:59.999`);
 
-    const qOrders = query(collection(db, "orders"), 
-        where("closedAt", ">=", startD.toISOString()),
-        where("closedAt", "<=", endD.toISOString())
-    );
-
-    const snap = await getDocs(qOrders);
-    const dashOrders = snap.docs.map(d => d.data());
-
     let totalRev = 0;
     let totalOrders = 0;
-    let itemCounts = {};
+    let aggItemCounts = {};
     let aggRevenues = {};
 
-    const diffDays = Math.floor((endD - startD) / (1000 * 60 * 60 * 24));
-    const isMonthly = diffDays > 90;
-
-    if (isMonthly) {
-        let curr = new Date(startD.getFullYear(), startD.getMonth(), 1);
-        while(curr <= endD) {
-            let mStr = `${curr.getFullYear()}-${String(curr.getMonth()+1).padStart(2,'0')}`;
-            aggRevenues[mStr] = 0;
-            curr.setMonth(curr.getMonth() + 1);
-        }
-    } else {
-        for(let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
-            aggRevenues[toYYYYMMDD(new Date(d))] = 0;
-        }
+    let currentD = new Date(startD);
+    const dateKeys = [];
+    while(currentD <= endD) {
+        dateKeys.push(toYYYYMMDD(currentD));
+        currentD.setDate(currentD.getDate() + 1);
     }
 
-    dashOrders.forEach(o => {
-        const od = new Date(o.closedAt);
-        const dKey = isMonthly 
-            ? `${od.getFullYear()}-${String(od.getMonth()+1).padStart(2,'0')}`
-            : toYYYYMMDD(od);
+    const statsSnap = await getDocs(collection(db, "stats"));
+    
+    statsSnap.forEach(docSnap => {
+        const dKey = docSnap.id;
+        if (dKey >= startDateStr && dKey <= endDateStr) {
+            const sData = docSnap.data();
+            totalRev += (sData.totalRevenue || 0);
+            totalOrders += (sData.orderCount || 0);
+            aggRevenues[dKey] = (sData.totalRevenue || 0);
 
-        if(aggRevenues[dKey] !== undefined) {
-            totalOrders++;
-            totalRev += o.total;
-            aggRevenues[dKey] += o.total;
-
-            (o.items || []).forEach(item => {
-                if(!item.deleted) {
-                    if(!itemCounts[item.name]) itemCounts[item.name] = 0;
-                    itemCounts[item.name]++;
-                }
-            });
+            if (sData.items) {
+                Object.entries(sData.items).forEach(([itemName, count]) => {
+                    aggItemCounts[itemName] = (aggItemCounts[itemName] || 0) + count;
+                });
+            }
         }
+    });
+
+    dateKeys.forEach(dk => {
+        if(aggRevenues[dk] === undefined) aggRevenues[dk] = 0;
     });
 
     dashTotalOrders.textContent = totalOrders;
     dashTotalRev.textContent = `${totalRev} ₺`;
 
-    let sortedItems = Object.entries(itemCounts).sort((a,b) => b[1] - a[1]);
+    let sortedItems = Object.entries(aggItemCounts).sort((a,b) => b[1] - a[1]);
     if(sortedItems.length > 0) {
         dashBestItem.textContent = `${sortedItems[0][0]} (${sortedItems[0][1]} Adet)`;
     } else {
         dashBestItem.textContent = "Veri Yok";
     }
 
-    let chartLabels = [];
-    if(isMonthly) {
-        chartLabels = Object.keys(aggRevenues).map(m => {
-            const [y, mo] = m.split('-'); return `${mo}/${y}`;
+    const diffDays = Math.floor((endD - startD) / (1000 * 60 * 60 * 24));
+    const isMonthly = diffDays > 90;
+    let finalAggRevenues = {};
+    
+    if (isMonthly) {
+        dateKeys.forEach(dk => {
+            const mStr = dk.substring(0, 7);
+            finalAggRevenues[mStr] = (finalAggRevenues[mStr] || 0) + aggRevenues[dk];
         });
     } else {
-        chartLabels = Object.keys(aggRevenues).map(d => {
-            const p = d.split('-'); return `${p[2]}.${p[1]}`;
-        });
+        finalAggRevenues = aggRevenues;
     }
 
-    renderCharts(chartLabels, Object.values(aggRevenues), sortedItems.slice(0,5));
+    const sortedKeys = Object.keys(finalAggRevenues).sort();
+    let chartLabels = [];
+    let chartData = [];
+    
+    sortedKeys.forEach(k => {
+        if (isMonthly) {
+            const [y, mo] = k.split('-');
+            chartLabels.push(`${mo}/${y}`);
+        } else {
+            const [y, mo, d] = k.split('-');
+            chartLabels.push(`${d}.${mo}`);
+        }
+        chartData.push(finalAggRevenues[k]);
+    });
+
+    renderCharts(chartLabels, chartData, sortedItems.slice(0,5));
 }
 
 function renderCharts(labelsRev, dataRev, topItems) {
