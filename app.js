@@ -170,27 +170,12 @@ async function bootSystem() {
         return;
     }
 
-    const settingsSnap = await getDoc(doc(db, "settings", "global"));
-    if (settingsSnap.exists()) {
-        companyInfo = settingsSnap.data();
-    } else {
-        await setDoc(doc(db, "settings", "global"), companyInfo);
-    }
-
     onSnapshot(doc(db, "settings", "global"), (snap) => {
         if (snap.exists()) {
-            const newSettings = snap.data();
-            const menuVersionChanged = newSettings.menuVersion !== companyInfo.menuVersion;
-            companyInfo = newSettings;
+            companyInfo = snap.data();
             applyGlobalSettings();
-            
-            if (menuVersionChanged) {
-                const localVersion = localStorage.getItem('twinA_menu_version');
-                if (localVersion && localVersion !== companyInfo.menuVersion) {
-                    if (isQRMode) loadQRCategoriesAndProducts();
-                    else if (currentUser) fetchMenuData();
-                }
-            }
+        } else {
+            setDoc(doc(db, "settings", "global"), companyInfo);
         }
     });
 
@@ -199,7 +184,6 @@ async function bootSystem() {
         const qrScreen = document.getElementById('qr-menu-app');
         qrScreen.style.display = 'flex';
         qrScreen.classList.add('active');
-        applyGlobalSettings();
         loadQRCategoriesAndProducts();
         return;
     }
@@ -212,7 +196,6 @@ async function bootSystem() {
                 const data = docSnap.data();
                 if(data.status !== 'passive') {
                     currentUser = { ...data, docId: docSnap.id };
-                    applyGlobalSettings();
                     startApp();
                     return;
                 }
@@ -220,7 +203,6 @@ async function bootSystem() {
         } catch(e) { console.error(e); }
     }
     
-    applyGlobalSettings();
     hideAllScreens();
     const loginScreen = document.getElementById('login-screen');
     loginScreen.style.display = 'flex';
@@ -275,7 +257,7 @@ function applyGlobalSettings() {
 
     const localVersion = localStorage.getItem('twinA_menu_version');
     const remoteVersion = companyInfo.menuVersion || '1';
-    if(localVersion && localVersion !== remoteVersion) {
+    if(localVersion !== remoteVersion) {
         if(isQRMode) {
             loadQRCategoriesAndProducts();
         } else if (currentUser) {
@@ -787,14 +769,10 @@ document.getElementById('add-category-btn').addEventListener('click', async () =
     const order = orderVal !== '' ? parseInt(orderVal) : ''; 
     
     if(name) {
-        const docRef = await addDoc(collection(db, "categories"), { name: name, order: order });
-        globalCategoriesList.push({ id: docRef.id, name: name, order: order });
-        globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-        renderCategoriesUI();
-        
+        await addDoc(collection(db, "categories"), { name: name, order: order });
         document.getElementById('cat-name').value = '';
         document.getElementById('cat-order').value = '';
-        showModal('BAŞARILI', 'Kategori eklendi. (Tüm cihazlara yansıtmak için Ayarlar > Menüyü Güncelle butonuna basmayı unutmayın.)', '', null, true);
+        showModal('BAŞARILI', 'Kategori eklendi.', '', null, true);
     }
 });
 
@@ -827,13 +805,6 @@ document.getElementById('update-cat-btn').addEventListener('click', async () => 
     
     await updateDoc(doc(db, "categories", catId), { name: newName, order: newOrder });
     
-    const catIndex = globalCategoriesList.findIndex(c => c.id === catId);
-    if(catIndex !== -1) {
-        globalCategoriesList[catIndex].name = newName;
-        globalCategoriesList[catIndex].order = newOrder;
-        globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-    }
-
     if(oldName !== newName) {
         const q = query(collection(db, "products"), where("cat", "==", oldName));
         const snap = await getDocs(q);
@@ -842,18 +813,12 @@ document.getElementById('update-cat-btn').addEventListener('click', async () => 
             updatePromises.push(updateDoc(doc(db, "products", d.id), { cat: newName }));
         });
         await Promise.all(updatePromises);
-        
-        globalProductsList.forEach(p => {
-            if(p.cat === oldName) p.cat = newName;
-        });
-        renderProductsUI();
     }
     
-    renderCategoriesUI();
     document.getElementById('edit-cat-select').value = '';
     document.getElementById('edit-cat-name').value = '';
     document.getElementById('edit-cat-order').value = '';
-    showModal('BAŞARILI', 'Kategori güncellendi. (Tüm cihazlara yansıtmak için Ayarlar > Menüyü Güncelle butonuna basmayı unutmayın.)', '', null, true);
+    showModal('BAŞARILI', 'Kategori güncellendi.', '', null, true);
 });
 
 document.getElementById('delete-cat-btn').addEventListener('click', () => {
@@ -864,13 +829,10 @@ document.getElementById('delete-cat-btn').addEventListener('click', () => {
     }
     showModal('KATEGORİ SİL', 'Bu kategoriyi silerseniz içindeki ürünler MENÜDE GÖRÜNMEZ. Emin misiniz?', '', async () => {
         await deleteDoc(doc(db, "categories", catId));
-        globalCategoriesList = globalCategoriesList.filter(c => c.id !== catId);
-        renderCategoriesUI();
-        
         document.getElementById('edit-cat-select').value = '';
         document.getElementById('edit-cat-name').value = '';
         document.getElementById('edit-cat-order').value = '';
-        showModal('BAŞARILI', 'Kategori silindi. (Güncelleme butonuna basmayı unutmayın.)', '', null, true);
+        showModal('BAŞARILI', 'Kategori silindi.', '', null, true);
     });
 });
 
@@ -948,17 +910,11 @@ function renderProductsUI() {
 
 window.toggleStock = async (id, state) => { 
     await updateDoc(doc(db, "products", id), { stock: state }); 
-    const index = globalProductsList.findIndex(p => p.id === id);
-    if(index !== -1) globalProductsList[index].stock = state;
-    renderProductsUI();
 };
-
 window.deleteProduct = (id) => {
     showModal('ÜRÜNÜ SİL', 'BU ÜRÜNÜ SİLMEK İSTEDİĞİNİZE EMİN MİSİNİZ?', '', async () => { 
         await deleteDoc(doc(db, "products", id)); 
-        globalProductsList = globalProductsList.filter(p => p.id !== id);
-        renderProductsUI();
-        showModal('BAŞARILI', 'Ürün silindi. (Güncelleme butonuna basmayı unutmayın.)', '', null, true);
+        showModal('BAŞARILI', 'Ürün silindi.', '', null, true);
     });
 };
 
@@ -1010,17 +966,10 @@ document.getElementById('save-product-btn').addEventListener('click', async () =
     if(data.name && data.price) {
         if(editingProductId) {
             await updateDoc(doc(db, "products", editingProductId), data);
-            const index = globalProductsList.findIndex(p => p.id === editingProductId);
-            if(index !== -1) globalProductsList[index] = { id: editingProductId, ...data };
-            globalProductsList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-            renderProductsUI();
-            showModal('BAŞARILI', 'Ürün güncellendi. (Tüm cihazlara yansıtmak için Ayarlar > Menüyü Güncelle butonuna basmayı unutmayın.)', '', null, true);
+            showModal('BAŞARILI', 'Ürün güncellendi.', '', null, true);
         } else {
-            const docRef = await addDoc(collection(db, "products"), data);
-            globalProductsList.push({ id: docRef.id, ...data });
-            globalProductsList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-            renderProductsUI();
-            showModal('BAŞARILI', 'Ürün eklendi. (Tüm cihazlara yansıtmak için Ayarlar > Menüyü Güncelle butonuna basmayı unutmayın.)', '', null, true);
+            await addDoc(collection(db, "products"), data);
+            showModal('BAŞARILI', 'Ürün eklendi.', '', null, true);
         }
         document.getElementById('cancel-edit-btn').click();
     }
