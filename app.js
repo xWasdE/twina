@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, collection, getDocs, getDoc, setDoc, updateDoc, doc, onSnapshot, query, where, addDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, getDoc, setDoc, updateDoc, doc, onSnapshot, query, where, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyDzTVIzmntO7ohuHxYYexXRi-vtPk_WCeY",
@@ -23,10 +23,10 @@ let editingProductStock = true;
 let isMaintenanceEnforced = false;
 let globalUnsubscribes = [];
 let timeUpdaterInterval = null;
-let liveOrderUnsubscribe = null;
 
 let globalOrders = [];
 let globalExpenses = [];
+let chartInstances = {};
 let globalCategoriesList = [];
 let globalProductsList = []; 
 
@@ -40,6 +40,9 @@ window.toggleTheme = () => {
     const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('theme', next);
+    if(document.getElementById('dashboard-view') && document.getElementById('dashboard-view').style.display === 'block') {
+        if(typeof initDashboard === 'function') initDashboard(); 
+    }
 };
 
 function initTheme() {
@@ -177,7 +180,7 @@ async function bootSystem() {
         const qrScreen = document.getElementById('qr-menu-app');
         qrScreen.style.display = 'flex';
         qrScreen.classList.add('active');
-        loadQRCategoriesAndProducts();
+        listenQRCategoriesAndProducts();
         return;
     }
 
@@ -193,7 +196,7 @@ async function bootSystem() {
                     return;
                 }
             }
-        } catch(e) { }
+        } catch(e) { console.error(e); }
     }
     
     hideAllScreens();
@@ -217,14 +220,9 @@ function applyGlobalSettings() {
     if(companyInfo.broadcast && companyInfo.broadcast.trim() !== "") {
         banner.innerHTML = `📢 <b>ÖZEL DUYURU:</b> ${companyInfo.broadcast}`;
         banner.style.display = 'block';
-        banner.style.visibility = 'visible';
-        banner.style.pointerEvents = 'auto';
         document.body.classList.add('has-broadcast');
     } else {
-        banner.innerHTML = '';
         banner.style.display = 'none';
-        banner.style.visibility = 'hidden';
-        banner.style.pointerEvents = 'none';
         document.body.classList.remove('has-broadcast');
     }
 
@@ -331,11 +329,9 @@ async function startApp() {
     try {
         const snap = await getDocs(collection(db, "tables"));
         if (snap.empty) {
-            const batch = writeBatch(db);
             for (let i = 1; i <= 28; i++) {
-                batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '' });
+                await setDoc(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '' });
             }
-            await batch.commit();
         }
     } catch(e){}
 
@@ -345,6 +341,17 @@ async function startApp() {
     
     if(currentUser.role === 'admin') { 
         listenStaff(); 
+        listenFinanceAndHistory();
+        
+        const dateInput = document.getElementById('history-date-filter');
+        if(dateInput) {
+            dateInput.value = toYYYYMMDD(new Date()); 
+        }
+        
+        const sDate = document.getElementById('dash-start-date');
+        const eDate = document.getElementById('dash-end-date');
+        if(sDate && !sDate.value) sDate.value = toYYYYMMDD(new Date());
+        if(eDate && !eDate.value) eDate.value = toYYYYMMDD(new Date());
     }
 }
 
@@ -379,6 +386,7 @@ function switchView(viewName) {
         menu: document.getElementById('menu-view'),
         staff: document.getElementById('staff-view'),
         finance: document.getElementById('finance-view'),
+        dashboard: document.getElementById('dashboard-view'),
         settings: document.getElementById('settings-view'),
         'staff-settings': document.getElementById('staff-settings-view')
     };
@@ -391,12 +399,8 @@ function switchView(viewName) {
         if(btn.dataset.target === `${viewName}-view`) btn.classList.add('active');
     });
 
-    if(viewName === 'finance' && currentUser && currentUser.role === 'admin') {
-        const dateInput = document.getElementById('history-date-filter');
-        if(dateInput && globalOrders.length === 0) { 
-            dateInput.value = toYYYYMMDD(new Date()); 
-            loadFinanceForDate(dateInput.value); 
-        }
+    if(viewName === 'dashboard' && currentUser && currentUser.role === 'admin') {
+        initDashboard();
     }
 }
 
@@ -474,11 +478,9 @@ document.getElementById('update-table-count-btn')?.addEventListener('click', asy
     const currentCount = existingTables.length > 0 ? existingTables[existingTables.length - 1].num : 0;
     
     if (targetCount > currentCount) {
-        const batch = writeBatch(db);
         for(let i = currentCount + 1; i <= targetCount; i++) {
-            batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            await setDoc(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
         }
-        await batch.commit();
         showModal('BAŞARILI', `Masa sayısı ${targetCount} olarak güncellendi.`, '', null, true);
     } else if (targetCount < currentCount) {
         let canDelete = true;
@@ -493,11 +495,9 @@ document.getElementById('update-table-count-btn')?.addEventListener('click', asy
             showModal('HATA', 'Silinmek istenen masalar arasında dolu veya rezerve olanlar var. Lütfen önce o masaları kapatın.', '', null, true);
             return;
         }
-        const batch = writeBatch(db);
         for(let i = targetCount + 1; i <= currentCount; i++) {
-            batch.delete(doc(db, "tables", `MASA ${i}`));
+            await deleteDoc(doc(db, "tables", `MASA ${i}`));
         }
-        await batch.commit();
         showModal('BAŞARILI', `Masa sayısı ${targetCount} olarak düşürüldü.`, '', null, true);
     } else {
         showModal('BİLGİ', 'Masa sayısı zaten aynı.', '', null, true);
@@ -541,26 +541,18 @@ document.getElementById('transfer-table-btn').addEventListener('click', async ()
         const currentOrderSnap = await getDoc(doc(db, "orders", currentOrderDocId));
         const orderData = currentOrderSnap.data();
 
-        const batch = writeBatch(db);
-
         if(targetData.status === 'empty') {
-            batch.update(doc(db, "orders", currentOrderDocId), { 
+            await updateDoc(doc(db, "orders", currentOrderDocId), { 
                 tableId: targetId, 
                 logs: [...(orderData.logs||[]), createLog("Masa Taşındı", `${currentTableId} -> ${targetId}`)] 
             });
-            batch.update(doc(db, "tables", targetId), { 
+            await updateDoc(doc(db, "tables", targetId), { 
                 status: 'active', currentOrderId: currentOrderDocId, totalAmount: orderData.total, paidAmount: orderData.paid, timestamp: new Date().toISOString() 
             });
-            batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
+            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
             
-            await batch.commit();
             showModal('BAŞARILI', 'Masa başarıyla taşındı.', '', null, true);
-            
             currentOrderDocId = null;
-            document.getElementById('adisyon-items').innerHTML = '';
-            document.getElementById('payment-logs').innerHTML = '';
-            document.getElementById('adisyon-subtotal').textContent = '0 ₺';
-            document.getElementById('adisyon-total').textContent = '0 ₺';
             switchView('tables');
 
         } else if (targetData.status === 'active') {
@@ -573,22 +565,16 @@ document.getElementById('transfer-table-btn').addEventListener('click', async ()
             const mergedTotal = (targetOrderData.total||0) + (orderData.total||0);
             const mergedPaid = (targetOrderData.paid||0) + (orderData.paid||0);
 
-            batch.update(doc(db, "orders", targetData.currentOrderId), {
+            await updateDoc(doc(db, "orders", targetData.currentOrderId), {
                 items: mergedItems, partialPayments: mergedPayments, total: mergedTotal, paid: mergedPaid, logs: mergedLogs
             });
-            batch.update(doc(db, "tables", targetId), { totalAmount: mergedTotal, paidAmount: mergedPaid });
+            await updateDoc(doc(db, "tables", targetId), { totalAmount: mergedTotal, paidAmount: mergedPaid });
             
-            batch.update(doc(db, "orders", currentOrderDocId), { status: 'merged_deleted' });
-            batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
+            await updateDoc(doc(db, "orders", currentOrderDocId), { status: 'merged_deleted' });
+            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
 
-            await batch.commit();
             showModal('BAŞARILI', 'Adisyonlar başarıyla birleştirildi.', '', null, true);
-            
             currentOrderDocId = null;
-            document.getElementById('adisyon-items').innerHTML = '';
-            document.getElementById('payment-logs').innerHTML = '';
-            document.getElementById('adisyon-subtotal').textContent = '0 ₺';
-            document.getElementById('adisyon-total').textContent = '0 ₺';
             switchView('tables');
         }
     });
@@ -648,14 +634,11 @@ async function createNewOrder(tableName) {
     const orderRef = doc(db, "orders", orderId);
     const ts = new Date().toISOString();
     
-    const batch = writeBatch(db);
-    batch.set(orderRef, {
+    await setDoc(orderRef, {
         tableId: tableName, status: 'open', items: [], partialPayments: [], paid: 0, total: 0, 
         createdAt: ts, creator: currentUser.name, logs: [createLog("Masa Açıldı", `${tableName} siparişe açıldı.`)]
     });
-    batch.update(doc(db, "tables", tableName), { status: 'active', currentOrderId: orderId, reservedName: '', totalAmount: 0, paidAmount: 0, timestamp: ts });
-    
-    await batch.commit();
+    await updateDoc(doc(db, "tables", tableName), { status: 'active', currentOrderId: orderId, reservedName: '', totalAmount: 0, paidAmount: 0, timestamp: ts });
     openOrderView(tableName, orderId);
 }
 
@@ -663,25 +646,12 @@ function openOrderView(tableName, orderId) {
     document.getElementById('current-table-name').textContent = tableName;
     document.getElementById('current-order-id').textContent = "ID: " + orderId;
     currentOrderDocId = orderId;
-    
-    document.getElementById('adisyon-items').innerHTML = '';
-    document.getElementById('payment-logs').innerHTML = '';
-    document.getElementById('adisyon-subtotal').textContent = '0 ₺';
-    document.getElementById('adisyon-total').textContent = '0 ₺';
-
     switchView('order');
     listenOrderData(orderId);
 }
 
 document.getElementById('back-to-tables').addEventListener('click', () => {
     currentOrderDocId = null;
-    if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; } 
-    
-    document.getElementById('adisyon-items').innerHTML = '';
-    document.getElementById('payment-logs').innerHTML = '';
-    document.getElementById('adisyon-subtotal').textContent = '0 ₺';
-    document.getElementById('adisyon-total').textContent = '0 ₺';
-
     switchView('tables');
 });
 
@@ -690,7 +660,12 @@ function listenCategories() {
     window.unsubCats = onSnapshot(collection(db, "categories"), (snapshot) => {
         globalCategoriesList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
         globalCategoriesList.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+        
         renderCategoriesUI();
+        
+        if(isQRMode && typeof window.renderQR === 'function') {
+            window.renderQR();
+        }
     });
     globalUnsubscribes.push(window.unsubCats);
 }
@@ -706,8 +681,10 @@ function renderCategoriesUI() {
     if(catSelect) catSelect.innerHTML = '';
     if(editCatSelect) editCatSelect.innerHTML = '<option value="">Kategori Seçin</option>';
     
+    // HATA DÜZELTMESİ (LOGIC BUG): Liste taranmadan önce mevcut kategori listelenenler arasında var mı diye bakıyoruz.
     let validCurrentCat = globalCategoriesList.some(c => c.name === currentCategory);
     
+    // Eğer seçili kategori veritabanında yoksa veya boşsa, en baştaki kategoriyi seçili yap
     if(!validCurrentCat && globalCategoriesList.length > 0) {
         currentCategory = globalCategoriesList[0].name;
     }
@@ -791,11 +768,11 @@ document.getElementById('update-cat-btn').addEventListener('click', async () => 
     if(oldName !== newName) {
         const q = query(collection(db, "products"), where("cat", "==", oldName));
         const snap = await getDocs(q);
-        const batch = writeBatch(db);
+        const updatePromises = [];
         snap.forEach((d) => {
-            batch.update(doc(db, "products", d.id), { cat: newName });
+            updatePromises.push(updateDoc(doc(db, "products", d.id), { cat: newName }));
         });
-        await batch.commit();
+        await Promise.all(updatePromises);
     }
     
     document.getElementById('edit-cat-select').value = '';
@@ -900,9 +877,7 @@ function renderProductsUI() {
     }
 }
 
-window.toggleStock = async (id, state) => { 
-    await updateDoc(doc(db, "products", id), { stock: state }); 
-};
+window.toggleStock = async (id, state) => { await updateDoc(doc(db, "products", id), { stock: state }); };
 window.deleteProduct = (id) => {
     showModal('ÜRÜNÜ SİL', 'BU ÜRÜNÜ SİLMEK İSTEDİĞİNİZE EMİN MİSİNİZ?', '', async () => { 
         await deleteDoc(doc(db, "products", id)); 
@@ -967,12 +942,11 @@ document.getElementById('save-product-btn').addEventListener('click', async () =
     }
 });
 
+let liveOrderUnsubscribe = null;
 function listenOrderData(orderId) {
     if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
     liveOrderUnsubscribe = onSnapshot(doc(db, "orders", orderId), (docSnap) => {
-        if (currentOrderDocId !== orderId) return; 
         if(!docSnap.exists()) return;
-        
         const o = docSnap.data();
         const list = document.getElementById('adisyon-items');
         if(!list) return;
@@ -1021,6 +995,12 @@ function listenOrderData(orderId) {
 
         document.getElementById('adisyon-subtotal').textContent = `${currentTotal} ₺`;
         document.getElementById('adisyon-total').textContent = `${currentTotal - totalPaid} ₺`;
+        
+        if(o.total !== currentTotal) {
+            updateDoc(doc(db, "orders", orderId), { total: currentTotal }).then(()=>{
+                if(currentTableId) updateDoc(doc(db, "tables", currentTableId), { totalAmount: currentTotal });
+            });
+        }
     });
 }
 
@@ -1028,22 +1008,14 @@ async function addItemToOrder(product) {
     if(!currentOrderDocId) return;
     const orderRef = doc(db, "orders", currentOrderDocId);
     const snap = await getDoc(orderRef);
-    if(!snap.exists()) return;
-    const data = snap.data();
-    const items = data.items || [];
-    const logs = data.logs || [];
+    const items = snap.data().items || [];
+    const logs = snap.data().logs || [];
     
     items.push({ name: product.name, price: product.price, waiter: currentUser.name, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}) });
     logs.push(createLog("ÜRÜN EKLENDİ", `1x ${product.name} eklendi.`));
     
-    const newTotal = (data.total || 0) + product.price;
-    
-    const batch = writeBatch(db);
-    batch.update(orderRef, { items: items, logs: logs, total: newTotal });
-    batch.update(doc(db, "tables", currentTableId), { totalAmount: newTotal });
-    await batch.commit();
+    await updateDoc(orderRef, { items: items, logs: logs });
 }
-window.addItemToOrder = addItemToOrder;
 
 window.deleteOrderItem = async (index) => {
     if(!currentOrderDocId) return;
@@ -1056,15 +1028,8 @@ window.deleteOrderItem = async (index) => {
     if(items[index] && !items[index].deleted) {
         items[index].deleted = true;
         items[index].deletedBy = currentUser.name;
-        
-        const newTotal = (data.total || 0) - items[index].price;
-        
         logs.push(createLog("ÜRÜN İPTALİ", `1x ${items[index].name} listeden çıkarıldı.`));
-        
-        const batch = writeBatch(db);
-        batch.update(orderRef, { items: items, logs: logs, total: newTotal });
-        batch.update(doc(db, "tables", currentTableId), { totalAmount: newTotal });
-        await batch.commit();
+        await updateDoc(orderRef, { items: items, logs: logs });
     }
 };
 
@@ -1105,11 +1070,8 @@ document.getElementById('partial-pay-btn').addEventListener('click', () => {
             pays.push({ amount: amt, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
             logs.push(createLog("ÖDEME ALINDI", `${method} ile tahsilat yapıldı: ${amt} ₺`));
             
-            const batch = writeBatch(db);
-            batch.update(ref, { partialPayments: pays, paid: newPaid, logs: logs });
-            batch.update(doc(db, "tables", currentTableId), { paidAmount: newPaid });
-            await batch.commit();
-            
+            await updateDoc(ref, { partialPayments: pays, paid: newPaid, logs: logs });
+            await updateDoc(doc(db, "tables", currentTableId), { paidAmount: newPaid });
             showModal('BAŞARILI', 'Kısmi ödeme kaydedildi.', '', null, true);
         }
     });
@@ -1180,11 +1142,8 @@ document.getElementById('item-pay-btn').addEventListener('click', async () => {
             pays.push({ amount: totalToPay, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name });
             logs.push(createLog("ÜRÜN BAZLI ÖDEME", `${method} ile tahsil edildi: ${totalToPay} ₺ (${itemNames.join(', ')})`));
             
-            const batch = writeBatch(db);
-            batch.update(ref, { items: freshItems, partialPayments: pays, paid: newPaid, logs: logs });
-            batch.update(doc(db, "tables", currentTableId), { paidAmount: newPaid });
-            await batch.commit();
-            
+            await updateDoc(ref, { items: freshItems, partialPayments: pays, paid: newPaid, logs: logs });
+            await updateDoc(doc(db, "tables", currentTableId), { paidAmount: newPaid });
             showModal('BAŞARILI', 'Seçilen ürünlerin ödemesi alındı.', '', null, true);
         }
     });
@@ -1226,51 +1185,20 @@ document.getElementById('close-table-btn').addEventListener('click', async () =>
             pays.push({ amount: remaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
             logs.push(createLog("HESAP KAPATILDI", `Kalan ${remaining} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
             
-            const batch = writeBatch(db);
-            batch.update(ref, { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
-            batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
-            
+            await updateDoc(ref, { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
+            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
             currentOrderDocId = null;
-            if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
-            document.getElementById('adisyon-items').innerHTML = '';
-            document.getElementById('payment-logs').innerHTML = '';
-            document.getElementById('adisyon-subtotal').textContent = '0 ₺';
-            document.getElementById('adisyon-total').textContent = '0 ₺';
             switchView('tables');
-            
-            await batch.commit();
-
-            const dateInput = document.getElementById('history-date-filter');
-            if (dateInput && dateInput.value) {
-                loadFinanceForDate(dateInput.value);
-            }
-            
             showModal('BAŞARILI', 'Hesap tahsil edildi ve masa kapatıldı.', '', null, true);
         });
     } else {
         showModal('MASAYI KAPAT', 'AÇIK HESAP BULUNMUYOR. MASA BOŞALTILACAKTIR. ONAYLIYOR MUSUNUZ?', '', async () => {
             const logs = d.logs || [];
             logs.push(createLog("MASA KAPATILDI", `Açık hesap olmadan masa boşaltıldı.`));
-            
-            const batch = writeBatch(db);
-            batch.update(ref, { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
-            batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
-            
+            await updateDoc(ref, { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
+            await updateDoc(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
             currentOrderDocId = null;
-            if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
-            document.getElementById('adisyon-items').innerHTML = '';
-            document.getElementById('payment-logs').innerHTML = '';
-            document.getElementById('adisyon-subtotal').textContent = '0 ₺';
-            document.getElementById('adisyon-total').textContent = '0 ₺';
             switchView('tables');
-            
-            await batch.commit();
-
-            const dateInput = document.getElementById('history-date-filter');
-            if (dateInput && dateInput.value) {
-                loadFinanceForDate(dateInput.value);
-            }
-            
             showModal('BAŞARILI', 'Masa boşaltıldı.', '', null, true);
         });
     }
@@ -1333,26 +1261,16 @@ function listenStaff() {
             const u = docSnap.data();
             const div = document.createElement('div');
             div.className = `admin-list-item ${u.status === 'passive' ? 'passive' : ''}`;
-            
-            let actionsHtml = `<button class="action-btn btn-blue" onclick="resetStaffPass('${docSnap.id}')">ŞİFRE</button>`;
-            
-            if (docSnap.id === currentUser.docId) {
-                actionsHtml += `<span style="color:var(--accent); font-size:10px; font-weight:900; margin-left:10px;">(BU SENSİN)</span>`;
-            } else {
-                actionsHtml += `
-                    <button class="action-btn btn-confirm" onclick="toggleStaffRole('${docSnap.id}', '${u.role}')">${u.role === 'admin' ? 'GARSON YAP' : 'ADMİN YAP'}</button>
-                    <button class="action-btn btn-cancel" onclick="toggleStaffStatus('${docSnap.id}', '${u.status}')">${u.status === 'passive' ? 'AKTİFLEŞTİR' : 'PASİFE AL'}</button>
-                    <button class="action-btn btn-red" onclick="deleteStaff('${docSnap.id}')">SİL</button>
-                `;
-            }
-
             div.innerHTML = `
                 <div class="info">
                     <strong>${u.name} ${u.status === 'passive' ? '<span style="color:var(--red); font-size:10px;">(PASİF)</span>' : ''}</strong>
                     <span style="color:var(--gray); font-size:11px; font-weight:800; letter-spacing:1px;">ROL: ${u.role === 'admin' ? 'YÖNETİCİ' : 'GARSON'} | İSİM: ${u.id || u.name}</span>
                 </div>
                 <div class="admin-actions">
-                    ${actionsHtml}
+                    <button class="action-btn btn-blue" onclick="resetStaffPass('${docSnap.id}')">ŞİFRE</button>
+                    <button class="action-btn btn-confirm" onclick="toggleStaffRole('${docSnap.id}', '${u.role}')">${u.role === 'admin' ? 'GARSON YAP' : 'ADMİN YAP'}</button>
+                    <button class="action-btn btn-cancel" onclick="toggleStaffStatus('${docSnap.id}', '${u.status}')">${u.status === 'passive' ? 'AKTİFLEŞTİR' : 'PASİFE AL'}</button>
+                    <button class="action-btn btn-red" onclick="deleteStaff('${docSnap.id}')">SİL</button>
                 </div>
             `;
             container.appendChild(div);
@@ -1452,31 +1370,26 @@ document.getElementById('clear-broadcast-btn').addEventListener('click', async (
     await updateDoc(doc(db, "settings", "global"), { broadcast: "" });
 });
 
-async function loadFinanceForDate(dateStr) {
-    if(!dateStr) return;
-    const [y, m, d] = dateStr.split('-');
-    
-    const startD = new Date(`${y}-${m}-${d}T00:00:00`);
-    const endD = new Date(`${y}-${m}-${d}T23:59:59.999`);
+function listenFinanceAndHistory() {
+    const unsub1 = onSnapshot(query(collection(db, "orders"), where("status", "==", "closed")), (snapshot) => {
+        globalOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        renderFinanceTotals();
+        renderFinanceHistoryList();
+    });
+    globalUnsubscribes.push(unsub1);
 
-    const qOrders = query(collection(db, "orders"), 
-        where("closedAt", ">=", startD.toISOString()),
-        where("closedAt", "<=", endD.toISOString())
-    );
+    const unsub2 = onSnapshot(collection(db, "expenses"), (snapshot) => {
+        globalExpenses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        renderFinanceTotals();
+        renderFinanceHistoryList();
+    });
+    globalUnsubscribes.push(unsub2);
+}
 
-    const qExpenses = query(collection(db, "expenses"), 
-        where("time", ">=", startD.toISOString()),
-        where("time", "<=", endD.toISOString())
-    );
-
-    const [snapO, snapE] = await Promise.all([getDocs(qOrders), getDocs(qExpenses)]);
-    
-    globalOrders = snapO.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    globalExpenses = snapE.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
+document.getElementById('history-date-filter').addEventListener('change', () => {
     renderFinanceTotals();
     renderFinanceHistoryList();
-}
+});
 
 function renderFinanceTotals() {
     const filterInput = document.getElementById('history-date-filter').value;
@@ -1734,22 +1647,19 @@ document.getElementById('save-expense-btn').addEventListener('click', async () =
         if(amt > 0 && desc) {
             await addDoc(collection(db, "expenses"), { amount: amt, desc: desc, user: currentUser ? currentUser.name : 'Bilinmeyen', time: new Date().toISOString() });
             document.getElementById('expense-amount').value = ''; document.getElementById('expense-desc').value = '';
-            
-            const dateInput = document.getElementById('history-date-filter');
-            if(dateInput) loadFinanceForDate(dateInput.value);
         }
-    } catch(e) {}
+    } catch(e) {
+        console.error(e);
+    }
 });
 
 window.deleteExpense = (id) => {
     showModal('MASRAFI SİL', 'BU MASRAFI SİLMEK İSTEDİĞİNİZE EMİN MİSİNİZ?', '', async () => { 
         await deleteDoc(doc(db, "expenses", id)); 
-        const dateInput = document.getElementById('history-date-filter');
-        if(dateInput) loadFinanceForDate(dateInput.value);
     });
 };
 
-async function loadQRCategoriesAndProducts() {
+function listenQRCategoriesAndProducts() {
     let globalCats = [];
     let globalProds = [];
 
@@ -1791,32 +1701,204 @@ async function loadQRCategoriesAndProducts() {
         });
     };
 
-    const localMenu = localStorage.getItem('twinA_menu');
-    const localVersion = localStorage.getItem('twinA_menu_version');
-    const remoteVersion = companyInfo.menuVersion || '1';
+    const unsubC = onSnapshot(collection(db, "categories"), (snapshot) => {
+        globalCats = [...snapshot.docs].map(d => d.data());
+        globalCats.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+        if(typeof window.renderQR === 'function') window.renderQR();
+    });
+    globalUnsubscribes.push(unsubC);
 
-    if (localMenu && localVersion === remoteVersion) {
-        const parsed = JSON.parse(localMenu);
-        globalCats = parsed.cats;
-        globalProds = parsed.prods;
-        window.renderQR();
+    const unsubP = onSnapshot(collection(db, "products"), (snapshot) => {
+        globalProds = [...snapshot.docs].map(d => d.data());
+        globalProds.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+        if(typeof window.renderQR === 'function') window.renderQR();
+    });
+    globalUnsubscribes.push(unsubP);
+}
+
+async function initDashboard() {
+    const dashTotalOrders = document.getElementById('dash-total-orders');
+    const dashTotalRev = document.getElementById('dash-total-revenue');
+    const dashBestItem = document.getElementById('dash-best-item');
+    if(!dashTotalOrders) return; 
+
+    document.getElementById('dash-range-select').addEventListener('change', (e) => {
+        if(e.target.value === 'custom') {
+            document.getElementById('dash-custom-range').style.display = 'flex';
+        } else {
+            document.getElementById('dash-custom-range').style.display = 'none';
+            applyDashboardRange(e.target.value);
+        }
+    });
+
+    document.getElementById('dash-apply-btn').addEventListener('click', () => {
+        const s = document.getElementById('dash-start-date').value;
+        const e = document.getElementById('dash-end-date').value;
+        if(s && e) {
+            updateDashboardData(s, e);
+        } else {
+            showModal('HATA', 'Lütfen başlangıç ve bitiş tarihlerini seçiniz.', '', null, true);
+        }
+    });
+
+    const select = document.getElementById('dash-range-select');
+    if(select.value !== 'custom') {
+        applyDashboardRange(select.value);
     } else {
-        try {
-            const [catSnap, prodSnap] = await Promise.all([
-                getDocs(collection(db, "categories")),
-                getDocs(collection(db, "products"))
-            ]);
-            
-            globalCats = catSnap.docs.map(d => d.data());
-            globalCats.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-            
-            globalProds = prodSnap.docs.map(d => d.data());
-            globalProds.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-            
-            localStorage.setItem('twinA_menu', JSON.stringify({ cats: globalCats, prods: globalProds }));
-            localStorage.setItem('twinA_menu_version', remoteVersion);
-            
-            window.renderQR();
-        } catch(e) {}
+        document.getElementById('dash-apply-btn').click();
     }
+}
+
+function applyDashboardRange(val) {
+    const end = new Date();
+    const start = new Date();
+
+    if (val === 'today') {
+    } else if (val === 'yesterday') {
+        start.setDate(start.getDate() - 1);
+        end.setDate(end.getDate() - 1);
+    } else {
+        start.setDate(start.getDate() - (parseInt(val) - 1));
+    }
+    
+    updateDashboardData(toYYYYMMDD(start), toYYYYMMDD(end));
+}
+
+function updateDashboardData(startDateStr, endDateStr) {
+    const dashTotalOrders = document.getElementById('dash-total-orders');
+    const dashTotalRev = document.getElementById('dash-total-revenue');
+    const dashBestItem = document.getElementById('dash-best-item');
+
+    let totalRev = 0;
+    let totalOrders = 0;
+    let itemCounts = {};
+    let aggRevenues = {};
+
+    const startD = new Date(startDateStr);
+    const endD = new Date(endDateStr);
+    const diffDays = Math.floor((endD - startD) / (1000 * 60 * 60 * 24));
+    
+    const isMonthly = diffDays > 90;
+
+    if (isMonthly) {
+        let curr = new Date(startD.getFullYear(), startD.getMonth(), 1);
+        while(curr <= endD) {
+            let mStr = `${curr.getFullYear()}-${String(curr.getMonth()+1).padStart(2,'0')}`;
+            aggRevenues[mStr] = 0;
+            curr.setMonth(curr.getMonth() + 1);
+        }
+    } else {
+        for(let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+            aggRevenues[toYYYYMMDD(new Date(d))] = 0;
+        }
+    }
+
+    globalOrders.forEach(o => {
+        const od = new Date(o.closedAt);
+        if (od >= startD && od <= new Date(endD.getTime() + 86400000)) { 
+            const dKey = isMonthly 
+                ? `${od.getFullYear()}-${String(od.getMonth()+1).padStart(2,'0')}`
+                : toYYYYMMDD(od);
+
+            if(aggRevenues[dKey] !== undefined) {
+                totalOrders++;
+                totalRev += o.total;
+                aggRevenues[dKey] += o.total;
+
+                (o.items || []).forEach(item => {
+                    if(!item.deleted) {
+                        if(!itemCounts[item.name]) itemCounts[item.name] = 0;
+                        itemCounts[item.name]++;
+                    }
+                });
+            }
+        }
+    });
+
+    dashTotalOrders.textContent = totalOrders;
+    dashTotalRev.textContent = `${totalRev} ₺`;
+
+    let sortedItems = Object.entries(itemCounts).sort((a,b) => b[1] - a[1]);
+    if(sortedItems.length > 0) {
+        dashBestItem.textContent = `${sortedItems[0][0]} (${sortedItems[0][1]} Adet)`;
+    } else {
+        dashBestItem.textContent = "Veri Yok";
+    }
+
+    let chartLabels = [];
+    if(isMonthly) {
+        chartLabels = Object.keys(aggRevenues).map(m => {
+            const [y, mo] = m.split('-'); return `${mo}/${y}`;
+        });
+    } else {
+        chartLabels = Object.keys(aggRevenues).map(d => {
+            const p = d.split('-'); return `${p[2]}.${p[1]}`;
+        });
+    }
+
+    renderCharts(chartLabels, Object.values(aggRevenues), sortedItems.slice(0,5));
+}
+
+function renderCharts(labelsRev, dataRev, topItems) {
+    const ctxRev = document.getElementById('revenueChart');
+    const ctxProd = document.getElementById('productsChart');
+
+    if(chartInstances.rev) chartInstances.rev.destroy();
+    if(chartInstances.prod) chartInstances.prod.destroy();
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const textColor = isDark ? '#F0EAD6' : '#2C2A26';
+    const gridColor = isDark ? '#2D2A26' : '#D1C9B8';
+
+    Chart.defaults.color = textColor;
+    Chart.defaults.font.family = "'Montserrat', sans-serif";
+
+    chartInstances.rev = new Chart(ctxRev, {
+        type: 'line',
+        data: {
+            labels: labelsRev,
+            datasets: [{
+                label: 'Ciro (₺)',
+                data: dataRev,
+                borderColor: '#D4AF37',
+                backgroundColor: 'rgba(212, 175, 55, 0.2)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointBackgroundColor: '#D4AF37'
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { grid: { color: gridColor } },
+                y: { grid: { color: gridColor }, beginAtZero: true }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    const labelsProd = topItems.map(i => i[0]);
+    const dataProd = topItems.map(i => i[1]);
+
+    chartInstances.prod = new Chart(ctxProd, {
+        type: 'bar',
+        data: {
+            labels: labelsProd,
+            datasets: [{
+                label: 'Satış Adedi',
+                data: dataProd,
+                backgroundColor: ['#D4AF37', '#5C7561', '#5C7A96', '#A65648', '#8A847A'],
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { grid: { display: false } },
+                y: { grid: { color: gridColor }, beginAtZero: true }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
 }
