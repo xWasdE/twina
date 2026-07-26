@@ -8,7 +8,6 @@
     <meta name="mobile-web-app-capable" content="yes">
     <title>TWIN-A</title>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800;900&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="style.css">
     <meta name="theme-color" content="#141210">
 </head>
@@ -88,7 +87,6 @@
             <button class="nav-btn" data-target="menu-view">MENÜ</button>
             <button class="nav-btn" data-target="staff-view">PERSONEL</button>
             <button class="nav-btn" data-target="finance-view">KASA & GEÇMİŞ</button>
-            <button class="nav-btn" data-target="dashboard-view">DASHBOARD</button>
             <button class="nav-btn" data-target="settings-view">AYARLAR</button>
         </nav>
         <nav id="staff-nav" style="display: none;">
@@ -263,58 +261,6 @@
                 </div>
             </main>
 
-            <main id="dashboard-view" class="view" style="display: none;">
-                <div class="finance-layout">
-                    <div class="flex-row" style="justify-content:space-between; align-items:center; border-bottom:2px dashed var(--border); padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap;">
-                        <h3 style="font-size:22px; color:var(--accent); font-family:var(--font-head); letter-spacing:4px; margin:0; border:none; padding:0;">GÖRSEL ANALİTİK</h3>
-                        <div class="flex-row" style="gap:15px;">
-                            <select id="dash-range-select" style="padding:10px 15px; font-size:12px; width:auto; border-radius:6px; cursor:pointer;">
-                                <option value="today">Bugün</option>
-                                <option value="yesterday">Dün</option>
-                                <option value="7" selected>Son 7 Gün</option>
-                                <option value="14">Son 14 Gün</option>
-                                <option value="30">Son 30 Gün</option>
-                                <option value="60">Son 60 Gün</option>
-                                <option value="90">Son 90 Gün</option>
-                                <option value="365">Son 1 Yıl</option>
-                                <option value="custom">Özel Tarih Belirle</option>
-                            </select>
-                            <div id="dash-custom-range" class="flex-row" style="display:none; gap:10px;">
-                                <input type="date" id="dash-start-date" style="padding:10px; font-size:12px; width:auto; border-radius:6px;">
-                                <span style="color:var(--gray); font-weight:900;">-</span>
-                                <input type="date" id="dash-end-date" style="padding:10px; font-size:12px; width:auto; border-radius:6px;">
-                                <button id="dash-apply-btn" class="btn-accent" style="padding:10px 20px; font-size:11px;">UYGULA</button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="finance-header-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
-                        <div class="finance-card">
-                            <h4 style="font-size:11px;">TOPLAM SİPARİŞ</h4>
-                            <span id="dash-total-orders">0</span>
-                        </div>
-                        <div class="finance-card">
-                            <h4 style="font-size:11px;">TOPLAM CİRO</h4>
-                            <span id="dash-total-revenue">0 ₺</span>
-                        </div>
-                        <div class="finance-card">
-                            <h4 style="font-size:11px;">EN ÇOK SATAN ÜRÜN</h4>
-                            <span id="dash-best-item" style="font-size:18px;">Yükleniyor...</span>
-                        </div>
-                    </div>
-                    <div class="finance-split" style="grid-template-columns: 1fr 1fr;">
-                        <div class="history-section" style="padding:25px;">
-                            <h4 style="font-size:13px; color:var(--gray); margin-bottom:20px; letter-spacing:1px; border-bottom:1px solid var(--border); padding-bottom:10px;">CİRO GRAFİĞİ</h4>
-                            <canvas id="revenueChart"></canvas>
-                        </div>
-                        <div class="history-section" style="padding:25px;">
-                            <h4 style="font-size:13px; color:var(--gray); margin-bottom:20px; letter-spacing:1px; border-bottom:1px solid var(--border); padding-bottom:10px;">EN ÇOK SATAN 5 ÜRÜN</h4>
-                            <canvas id="productsChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </main>
-
             <main id="settings-view" class="view" style="display: none;">
                 <div class="admin-panel-layout">
                     
@@ -371,12 +317,6 @@
                                 <p style="font-size:11px; color:var(--gray); margin-bottom:10px; font-weight:700; line-height:1.4;">Sistemi bakıma alırsanız garsonlar ve QR menüye giren müşteriler bakım ekranı görürler.</p>
                                 <button id="toggle-maintenance-btn" class="btn-cancel" style="width:100%; padding:10px; font-size:11px; letter-spacing:1px;"></button>
                             </div>
-                        </div>
-
-                        <div class="add-form">
-                            <h3>MENÜ GÜNCELLEME (ÖNBELLEK)</h3>
-                            <p style="font-size:10px; color:var(--gray); margin-bottom:10px;">Fiyat değiştirdiğinizde veya yeni ürün eklediğinizde tüm garsonlarda ve QR menüde güncellenmesi için bu butona basmalısınız.</p>
-                            <button id="force-menu-update-btn" class="btn-accent" style="padding:10px; font-size:11px;">🚀 TÜM CİHAZLARDA MENÜYÜ GÜNCELLE</button>
                         </div>
                     </div>
 
