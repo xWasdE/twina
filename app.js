@@ -168,11 +168,15 @@ async function bootSystem() {
     }
 
     try {
-        const snap = await getDoc(doc(db, "settings", "global"));
-        if (snap.exists()) {
+        const fetchSettings = getDoc(doc(db, "settings", "global"));
+        const snap = await Promise.race([
+            fetchSettings,
+            new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 4000))
+        ]);
+        if (snap && snap.exists()) {
             companyInfo = snap.data();
             applyGlobalSettings();
-        } else {
+        } else if (snap) {
             await setDoc(doc(db, "settings", "global"), companyInfo);
         }
     } catch(e) {}
@@ -189,8 +193,12 @@ async function bootSystem() {
     const savedUserId = localStorage.getItem('twinA_uid');
     if (savedUserId) {
         try {
-            const docSnap = await getDoc(doc(db, "users", savedUserId));
-            if(docSnap.exists()) {
+            const fetchUser = getDoc(doc(db, "users", savedUserId));
+            const docSnap = await Promise.race([
+                fetchUser,
+                new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 4000))
+            ]);
+            if(docSnap && docSnap.exists()) {
                 const data = docSnap.data();
                 if(data.status !== 'passive') {
                     currentUser = { ...data, docId: docSnap.id };
@@ -287,37 +295,45 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     submitBtn.disabled = true;
     
     try {
-        const q1 = query(collection(db, "users"), where("id", "==", id), where("password", "==", pass));
-        const q2 = query(collection(db, "users"), where("name", "==", id), where("password", "==", pass));
-        
-        const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-        const userDoc = !snap1.empty ? snap1.docs[0] : (!snap2.empty ? snap2.docs[0] : null);
+        const performLogin = async () => {
+            const q1 = query(collection(db, "users"), where("id", "==", id), where("password", "==", pass));
+            let snap = await getDocs(q1);
+            if (!snap.empty) return snap.docs[0];
+
+            const q2 = query(collection(db, "users"), where("name", "==", id), where("password", "==", pass));
+            snap = await getDocs(q2);
+            if (!snap.empty) return snap.docs[0];
+
+            return null;
+        };
+
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000));
+        const userDoc = await Promise.race([performLogin(), timeout]);
 
         if (userDoc) {
             const data = userDoc.data();
             if(data.status === 'passive') {
                 errorBox.textContent = 'HESABINIZ PASİFE ALINMIŞTIR!';
                 errorBox.style.display = 'block';
-                submitBtn.textContent = originalText;
-                submitBtn.disabled = false;
-                return;
-            }
-            if(companyInfo.maintenance && data.role !== 'admin') {
+            } else if(companyInfo.maintenance && data.role !== 'admin') {
                 errorBox.textContent = 'SİSTEM BAKIMDA! SADECE YÖNETİCİLER GİRİŞ YAPABİLİR.';
                 errorBox.style.display = 'block';
-                submitBtn.textContent = originalText;
-                submitBtn.disabled = false;
-                return;
+            } else {
+                currentUser = { ...data, docId: userDoc.id };
+                localStorage.setItem('twinA_uid', userDoc.id);
+                startApp();
+                return; 
             }
-            currentUser = { ...data, docId: userDoc.id };
-            localStorage.setItem('twinA_uid', userDoc.id);
-            startApp();
         } else {
             errorBox.textContent = 'HATALI İSİM/ID VEYA ŞİFRE!';
             errorBox.style.display = 'block';
         }
     } catch (error) {
-        errorBox.textContent = 'BAĞLANTI HATASI!';
+        if (error.message === "timeout") {
+            errorBox.textContent = 'AĞ BAĞLANTISI GECİKTİ! LÜTFEN TEKRAR TIKLAYIN.';
+        } else {
+            errorBox.textContent = 'BAĞLANTI HATASI!';
+        }
         errorBox.style.display = 'block';
     } finally {
         submitBtn.textContent = originalText;
@@ -341,8 +357,12 @@ async function startApp() {
     }
 
     try {
-        const snap = await getDocs(collection(db, "tables"));
-        if (snap.empty) {
+        const fetchTables = getDocs(collection(db, "tables"));
+        const snap = await Promise.race([
+            fetchTables,
+            new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 4000))
+        ]);
+        if (snap && snap.empty) {
             const batch = writeBatch(db);
             for (let i = 1; i <= 28; i++) {
                 batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '' });
@@ -357,10 +377,11 @@ async function startApp() {
     
     if(currentUser.role === 'admin') { 
         listenStaff(); 
+        listenFinanceAndHistory();
+        
         const dateInput = document.getElementById('history-date-filter');
         if(dateInput) {
             dateInput.value = toYYYYMMDD(new Date()); 
-            loadFinanceForDate(dateInput.value);
         }
     }
 }
@@ -1047,7 +1068,9 @@ function renderAdisyon(o) {
 function listenOrderData(orderId) {
     if(liveOrderUnsubscribe) { liveOrderUnsubscribe(); liveOrderUnsubscribe = null; }
     
-    currentOrderData = { items: [], partialPayments: [], paid: 0, total: 0, logs: [] };
+    if (!currentOrderData || currentOrderData.tableId !== currentTableId) {
+        currentOrderData = { items: [], partialPayments: [], paid: 0, total: 0, logs: [] };
+    }
     renderAdisyon(currentOrderData);
 
     liveOrderUnsubscribe = onSnapshot(doc(db, "orders", orderId), (docSnap) => {
@@ -1510,61 +1533,59 @@ document.getElementById('clear-broadcast-btn').addEventListener('click', () => {
     });
 });
 
-document.getElementById('history-date-filter')?.addEventListener('change', (e) => {
-    loadFinanceForDate(e.target.value);
-});
-
-function loadFinanceForDate(dateStr) {
-    if(!dateStr) return;
-    const [y, m, d] = dateStr.split('-');
-    
-    const startD = new Date(`${y}-${m}-${d}T00:00:00`).toISOString();
-    const endD = new Date(`${y}-${m}-${d}T23:59:59.999`).toISOString();
-
-    if(financeUnsubOrders) { financeUnsubOrders(); financeUnsubOrders = null; }
-    if(financeUnsubExpenses) { financeUnsubExpenses(); financeUnsubExpenses = null; }
-
-    const qOrders = query(collection(db, "orders"), 
-        where("closedAt", ">=", startD),
-        where("closedAt", "<=", endD)
-    );
-
-    const qExpenses = query(collection(db, "expenses"), 
-        where("time", ">=", startD),
-        where("time", "<=", endD)
-    );
-
-    financeUnsubOrders = onSnapshot(qOrders, (snapshot) => {
+function listenFinanceAndHistory() {
+    const unsub1 = onSnapshot(query(collection(db, "orders"), where("status", "==", "closed")), (snapshot) => {
         globalOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         renderFinanceTotals();
         renderFinanceHistoryList();
     });
-    globalUnsubscribes.push(() => { if(financeUnsubOrders) financeUnsubOrders(); });
+    globalUnsubscribes.push(unsub1);
 
-    financeUnsubExpenses = onSnapshot(qExpenses, (snapshot) => {
+    const unsub2 = onSnapshot(collection(db, "expenses"), (snapshot) => {
         globalExpenses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         renderFinanceTotals();
         renderFinanceHistoryList();
     });
-    globalUnsubscribes.push(() => { if(financeUnsubExpenses) financeUnsubExpenses(); });
+    globalUnsubscribes.push(unsub2);
 }
 
+document.getElementById('history-date-filter')?.addEventListener('change', () => {
+    renderFinanceTotals();
+    renderFinanceHistoryList();
+});
+
 function renderFinanceTotals() {
+    const filterInput = document.getElementById('history-date-filter').value;
+    if(!filterInput) return;
+    
+    const [y, m, d] = filterInput.split('-');
+    const targetDateStr = `${d}.${m}.${y}`;
+
     let todayIncome = 0;
     let todayExpense = 0;
     let tNak = 0; let tKK = 0; let tYK = 0;
 
     globalOrders.forEach(o => {
-        todayIncome += (o.total || 0);
-        (o.partialPayments || []).forEach(p => {
-            if(p.method === 'Nakit') tNak += p.amount;
-            if(p.method === 'Kredi Kartı') tKK += p.amount;
-            if(p.method === 'Yemek Kartı') tYK += p.amount;
-        });
+        const closedDateArr = new Date(o.closedAt).toLocaleDateString('tr-TR').split('.');
+        const formatClosed = `${closedDateArr[0].padStart(2, '0')}.${closedDateArr[1].padStart(2, '0')}.${closedDateArr[2]}`;
+        
+        if(formatClosed === targetDateStr) {
+            todayIncome += o.total;
+            (o.partialPayments || []).forEach(p => {
+                if(p.method === 'Nakit') tNak += p.amount;
+                if(p.method === 'Kredi Kartı') tKK += p.amount;
+                if(p.method === 'Yemek Kartı') tYK += p.amount;
+            });
+        }
     });
 
     globalExpenses.forEach(e => {
-        todayExpense += (e.amount || 0);
+        const expDateArr = new Date(e.time).toLocaleDateString('tr-TR').split('.');
+        const formatExp = `${expDateArr[0].padStart(2, '0')}.${expDateArr[1].padStart(2, '0')}.${expDateArr[2]}`;
+        
+        if(formatExp === targetDateStr) {
+            todayExpense += e.amount;
+        }
     });
 
     document.getElementById('today-income').textContent = `${todayIncome} ₺`;
@@ -1582,6 +1603,12 @@ function renderFinanceTotals() {
 }
 
 function renderFinanceHistoryList() {
+    const filterInput = document.getElementById('history-date-filter').value; 
+    if(!filterInput) return;
+    
+    const [y, m, d] = filterInput.split('-');
+    const targetDateStr = `${d}.${m}.${y}`;
+
     const historyContainer = document.getElementById('finance-history-list');
     const expenseContainer = document.getElementById('expense-list');
     
@@ -1589,20 +1616,29 @@ function renderFinanceHistoryList() {
     expenseContainer.innerHTML = '';
 
     globalExpenses.forEach(e => {
-        expenseContainer.innerHTML += `
-            <div class="expense-item">
-                <div style="flex:1; font-weight:900; font-size:11px; color:var(--text); letter-spacing:1px;">${e.desc} <span style="color:var(--gray); font-size:9px;">(${e.user})</span></div>
-                <div style="color:var(--red); font-weight:900; margin-right:15px; font-size:13px;">- ${e.amount} ₺</div>
-                <button class="action-btn btn-cancel" type="button" onclick="event.stopPropagation(); deleteExpense('${e.id}')">SİL</button>
-            </div>
-        `;
+        const expDateArr = new Date(e.time).toLocaleDateString('tr-TR').split('.');
+        const formatExp = `${expDateArr[0].padStart(2, '0')}.${expDateArr[1].padStart(2, '0')}.${expDateArr[2]}`;
+
+        if(formatExp === targetDateStr) {
+            expenseContainer.innerHTML += `
+                <div class="expense-item">
+                    <div style="flex:1; font-weight:900; font-size:11px; color:var(--text); letter-spacing:1px;">${e.desc} <span style="color:var(--gray); font-size:9px;">(${e.user})</span></div>
+                    <div style="color:var(--red); font-weight:900; margin-right:15px; font-size:13px;">- ${e.amount} ₺</div>
+                    <button class="action-btn btn-cancel" type="button" onclick="event.stopPropagation(); deleteExpense('${e.id}')">SİL</button>
+                </div>
+            `;
+        }
     });
 
     if(expenseContainer.innerHTML === '') expenseContainer.innerHTML = '<p style="color:var(--gray); font-size:11px;">Kayıt yok.</p>';
 
-    const sortedOrders = [...globalOrders].sort((a,b) => new Date(b.closedAt) - new Date(a.closedAt));
+    const filteredOrders = globalOrders.filter(o => {
+        const closedDateArr = new Date(o.closedAt).toLocaleDateString('tr-TR').split('.');
+        const formatClosed = `${closedDateArr[0].padStart(2, '0')}.${closedDateArr[1].padStart(2, '0')}.${closedDateArr[2]}`;
+        return formatClosed === targetDateStr;
+    });
     
-    sortedOrders.forEach(o => {
+    filteredOrders.sort((a,b) => new Date(b.closedAt) - new Date(a.closedAt)).forEach(o => {
         let logHtml = `<div><strong style="color:var(--accent); font-size:12px; letter-spacing:1px;">SİPARİŞ İÇERİĞİ:</strong></div>`;
         
         let groups = {};
@@ -1638,38 +1674,48 @@ function renderFinanceHistoryList() {
         `;
     });
 
-    if(sortedOrders.length === 0) {
+    if(filteredOrders.length === 0) {
         historyContainer.innerHTML = '<p style="color:var(--gray); padding:15px; font-weight:bold; font-size:11px;">Bu tarihe ait sipariş kaydı bulunamadı.</p>';
     }
 }
 
 document.getElementById('z-report-btn').addEventListener('click', () => {
+    const filterInput = document.getElementById('history-date-filter').value || toYYYYMMDD(new Date());
+    const [y, m, d] = filterInput.split('-');
+    const reportDisplayDate = `${d}.${m}.${y}`;
+
     let totalNakit = 0; let totalKK = 0; let totalYK = 0;
     let userTotals = {}; let dailyExpenses = 0;
 
     globalOrders.forEach(o => {
-        (o.partialPayments || []).forEach(p => {
-            const amt = p.amount; const user = p.user;
-            if(p.method === 'Nakit') totalNakit += amt;
-            else if(p.method === 'Kredi Kartı') totalKK += amt;
-            else if(p.method === 'Yemek Kartı') totalYK += amt;
+        const closedDateArr = new Date(o.closedAt).toLocaleDateString('tr-TR').split('.');
+        const formatClosed = `${closedDateArr[0].padStart(2, '0')}.${closedDateArr[1].padStart(2, '0')}.${closedDateArr[2]}`;
 
-            if(!userTotals[user]) userTotals[user] = { Nakit: 0, 'Kredi Kartı': 0, 'Yemek Kartı': 0, Toplam: 0 };
-            userTotals[user][p.method] += amt;
-            userTotals[user].Toplam += amt;
-        });
+        if(formatClosed === reportDisplayDate) {
+            (o.partialPayments || []).forEach(p => {
+                const amt = p.amount; const user = p.user;
+                if(p.method === 'Nakit') totalNakit += amt;
+                else if(p.method === 'Kredi Kartı') totalKK += amt;
+                else if(p.method === 'Yemek Kartı') totalYK += amt;
+
+                if(!userTotals[user]) userTotals[user] = { Nakit: 0, 'Kredi Kartı': 0, 'Yemek Kartı': 0, Toplam: 0 };
+                userTotals[user][p.method] += amt;
+                userTotals[user].Toplam += amt;
+            });
+        }
     });
 
     globalExpenses.forEach(e => {
-        dailyExpenses += e.amount;
+        const expDateArr = new Date(e.time).toLocaleDateString('tr-TR').split('.');
+        const formatExp = `${expDateArr[0].padStart(2, '0')}.${expDateArr[1].padStart(2, '0')}.${expDateArr[2]}`;
+
+        if(formatExp === reportDisplayDate) {
+            dailyExpenses += e.amount;
+        }
     });
 
     const ciro = totalNakit + totalKK + totalYK;
     const net = ciro - dailyExpenses;
-    
-    const filterInput = document.getElementById('history-date-filter').value || toYYYYMMDD(new Date());
-    const [y, m, d] = filterInput.split('-');
-    const reportDisplayDate = `${d}.${m}.${y}`;
 
     let html = `
         <div style="width: 100%; max-width: 400px; margin: 0 auto;">
