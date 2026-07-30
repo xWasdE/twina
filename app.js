@@ -158,6 +158,95 @@ function toYYYYMMDD(dateObj) {
     return `${y}-${m}-${d}`;
 }
 
+// İŞLETME GÜNÜ HESAPLAMA (Gece kapanışlarına özel)
+function getBusinessDateObj(dateInput) {
+    const d = new Date(dateInput);
+    if(companyInfo.close) {
+        const parts = companyInfo.close.split(':');
+        if(parts.length === 2) {
+            const closeHour = parseInt(parts[0], 10);
+            const closeMin = parseInt(parts[1], 10);
+            
+            if (closeHour >= 0 && closeHour <= 12) {
+                const currentHour = d.getHours();
+                const currentMin = d.getMinutes();
+                if(currentHour < closeHour || (currentHour === closeHour && currentMin < closeMin)) {
+                    d.setDate(d.getDate() - 1);
+                }
+            }
+        }
+    }
+    return d;
+}
+
+function getBusinessDateStr(dateInput) {
+    if(!dateInput) return "";
+    const d = getBusinessDateObj(dateInput);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${day}.${m}.${y}`;
+}
+
+// HTML/CSS'e DOKUNMADAN DASHBOARD EKRANINI DİNAMİK ENJEKTE EDEN FONKSİYON
+function injectDashboardUI() {
+    if(document.getElementById('dashboard-view')) return;
+
+    // CSS Gömme
+    const style = document.createElement('style');
+    style.innerHTML = `
+        .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .dash-card { background: var(--card-bg); border-top: 4px solid var(--accent); padding: 25px; border-radius: 6px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); border-left:1px solid var(--border); border-right:1px solid var(--border); border-bottom:1px solid var(--border); }
+        .dash-card h4 { color: var(--gray); font-size: 11px; margin-bottom: 12px; font-family: var(--font-body); letter-spacing: 1px; margin-top:0; font-weight:900; }
+        .dash-card .val { font-size: 28px; font-weight: 900; color: var(--text); font-family: var(--font-head); letter-spacing:1px; }
+        .dash-bar-wrap { margin-bottom: 15px; }
+        .dash-bar-info { display: flex; justify-content: space-between; font-size: 11px; font-weight: 900; margin-bottom: 6px; color: var(--text); letter-spacing:1px; }
+        .dash-bar-bg { width: 100%; background: var(--bg); height: 8px; border-radius: 4px; overflow: hidden; border:1px solid var(--border); }
+        .dash-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 1s ease-in-out; }
+        .dash-msg { text-align: center; padding: 50px 20px; background: var(--card-bg); border: 2px dashed var(--border); border-radius: 8px; color: var(--gray); font-weight: 800; line-height: 1.6; font-size:12px; }
+    `;
+    document.head.appendChild(style);
+
+    // Ana Ekran Gömme
+    const viewContainer = document.querySelector('.view-container');
+    if(viewContainer) {
+        const mainDash = document.createElement('main');
+        mainDash.id = 'dashboard-view';
+        mainDash.className = 'view';
+        mainDash.style.display = 'none';
+        mainDash.innerHTML = `
+            <div class="flex-row" style="justify-content:space-between; align-items:center; margin-bottom:25px; flex-wrap:wrap; border-bottom:1px solid var(--border); padding-bottom:15px;">
+                <h3 style="font-family:var(--font-head); color:var(--text); margin:0; font-size:20px; letter-spacing:3px;">GÜNLÜK ÖZET <span style="color:var(--accent);">(DASHBOARD)</span></h3>
+                <input type="date" id="dashboard-date-filter" style="width:auto; padding:10px 15px; font-size:12px; border-radius:4px; font-weight:900; background:var(--card-bg); border-color:var(--accent); color:var(--text); cursor:pointer;">
+            </div>
+            <div id="dashboard-content"></div>
+        `;
+        const footer = viewContainer.querySelector('.app-footer');
+        viewContainer.insertBefore(mainDash, footer);
+        
+        document.getElementById('dashboard-date-filter').addEventListener('change', (e) => {
+            loadDashboardData(e.target.value);
+        });
+    }
+
+    // Navigasyon Butonu Gömme
+    const adminNav = document.getElementById('admin-nav');
+    if(adminNav) {
+        const dashBtn = document.createElement('button');
+        dashBtn.className = 'nav-btn';
+        dashBtn.dataset.target = 'dashboard-view';
+        dashBtn.innerHTML = 'DASHBOARD';
+        
+        if(adminNav.children.length >= 3) {
+            adminNav.insertBefore(dashBtn, adminNav.children[3]);
+        } else {
+            adminNav.appendChild(dashBtn);
+        }
+
+        dashBtn.addEventListener('click', () => switchView('dashboard'));
+    }
+}
+
 async function bootSystem() {
     if (expectedHash !== '' && expectedHash !== '#') {
         hideAllScreens();
@@ -349,6 +438,7 @@ async function startApp() {
     document.getElementById('active-user-name').textContent = currentUser.name.toUpperCase();
 
     if (currentUser.role === 'admin') {
+        injectDashboardUI(); // YÖNETİCİ GİRERSE DASHBOARD OLUŞTURULUR
         document.getElementById('admin-nav').style.display = 'flex';
         document.getElementById('staff-nav').style.display = 'none';
     } else {
@@ -381,7 +471,7 @@ async function startApp() {
         
         const dateInput = document.getElementById('history-date-filter');
         if(dateInput) {
-            dateInput.value = toYYYYMMDD(new Date()); 
+            dateInput.value = toYYYYMMDD(getBusinessDateObj(new Date())); 
         }
     }
 }
@@ -418,7 +508,8 @@ function switchView(viewName) {
         staff: document.getElementById('staff-view'),
         finance: document.getElementById('finance-view'),
         settings: document.getElementById('settings-view'),
-        'staff-settings': document.getElementById('staff-settings-view')
+        'staff-settings': document.getElementById('staff-settings-view'),
+        dashboard: document.getElementById('dashboard-view') // YENİ GÖRÜNÜM
     };
 
     Object.values(viewElements).forEach(v => { if(v) v.style.display = 'none'; });
@@ -432,10 +523,223 @@ function switchView(viewName) {
     if(viewName === 'finance' && currentUser && currentUser.role === 'admin') {
         const dateInput = document.getElementById('history-date-filter');
         if(dateInput && !financeUnsubOrders) { 
-            dateInput.value = toYYYYMMDD(new Date()); 
+            dateInput.value = toYYYYMMDD(getBusinessDateObj(new Date())); 
             loadFinanceForDate(dateInput.value); 
         }
     }
+
+    if(viewName === 'dashboard' && currentUser && currentUser.role === 'admin') {
+        const dFilter = document.getElementById('dashboard-date-filter');
+        if(dFilter && !dFilter.value) {
+            dFilter.value = toYYYYMMDD(getBusinessDateObj(new Date()));
+        }
+        loadDashboardData(dFilter.value);
+    }
+}
+
+// DASHBOARD LAZY EVALUATION / OKUMA & YAZMA MANTIĞI
+async function loadDashboardData(isoDateStr) {
+    const content = document.getElementById('dashboard-content');
+    if(!content) return;
+    content.innerHTML = '<div class="dash-msg">Veriler yükleniyor...</div>';
+
+    const [y, m, d] = isoDateStr.split('-');
+    const targetDateStr = `${d}.${m}.${y}`;
+    
+    const todayStr = getBusinessDateStr(new Date());
+    if (targetDateStr === todayStr) {
+        content.innerHTML = `
+            <div class="dash-msg" style="border-color: var(--accent);">
+                <h3 style="color:var(--accent); margin-bottom:10px; font-family:var(--font-head); font-size:18px;">BUGÜNÜN VERİLERİ BEKLENİYOR</h3>
+                Bu işletme gününe ait veriler henüz kalıcı olarak derlenmemiştir.<br>
+                Güncel canlı durumu <b>Kasa & Geçmiş</b> bölümünden takip edebilirsiniz.<br><br>
+                <span style="font-size:11px;">(Bugünün detaylı istatistikleri gece kapanış saatinde otomatik analiz edilip sadece tek bir veriye dönüştürülecek ve bu ekrana sabitlenecektir.)</span>
+            </div>`;
+        return;
+    }
+
+    const reportRef = doc(db, "daily_reports", targetDateStr);
+    try {
+        const reportSnap = await getDoc(reportRef);
+        if (reportSnap.exists()) {
+            renderDashboard(reportSnap.data(), targetDateStr);
+        } else {
+            content.innerHTML = '<div class="dash-msg">Geçmiş veriler okunup analiz ediliyor, lütfen bekleyin... (Bu işlem bir güne özel tek seferliktir)</div>';
+            
+            const closeParts = (companyInfo.close || "00:00").split(':');
+            const cH = parseInt(closeParts[0], 10);
+            const cM = parseInt(closeParts[1], 10);
+
+            const startDate = new Date(parseInt(y), parseInt(m)-1, parseInt(d), cH, cM, 0);
+            const endDate = new Date(startDate.getTime());
+            endDate.setDate(endDate.getDate() + 1);
+
+            const startIso = startDate.toISOString();
+            const endIso = endDate.toISOString();
+
+            // Index hatası almamak için status yerelde filtrelenir
+            const qOrders = query(collection(db, "orders"), where("closedAt", ">=", startIso), where("closedAt", "<", endIso));
+            const orderSnaps = await getDocs(qOrders);
+            
+            const qExpenses = query(collection(db, "expenses"), where("time", ">=", startIso), where("time", "<", endIso));
+            const expSnaps = await getDocs(qExpenses);
+
+            let totalIncome = 0; let totalDiscount = 0; let tableCount = 0;
+            let itemCounts = {}; let waiterTotals = {}; 
+            let payMethods = { "Nakit": 0, "Kredi Kartı": 0, "Yemek Kartı": 0 };
+            let totalExp = 0;
+
+            orderSnaps.forEach(docSnap => {
+                const o = docSnap.data();
+                if(o.status !== 'closed') return;
+                
+                tableCount++;
+                totalIncome += (o.total - (o.discountAmount || 0));
+                totalDiscount += (o.discountAmount || 0);
+
+                (o.items || []).forEach(item => {
+                    if(!item.deleted) {
+                        if(!itemCounts[item.name]) itemCounts[item.name] = { qty: 0, rev: 0 };
+                        itemCounts[item.name].qty++;
+                        itemCounts[item.name].rev += item.price;
+
+                        if(!waiterTotals[item.waiter]) waiterTotals[item.waiter] = { itemsAdded: 0, collected: 0 };
+                        waiterTotals[item.waiter].itemsAdded++;
+                    }
+                });
+
+                (o.partialPayments || []).forEach(p => {
+                    if(payMethods[p.method] !== undefined) payMethods[p.method] += p.amount;
+                    if(!waiterTotals[p.user]) waiterTotals[p.user] = { itemsAdded: 0, collected: 0 };
+                    waiterTotals[p.user].collected += p.amount;
+                });
+            });
+
+            expSnaps.forEach(docSnap => {
+                totalExp += docSnap.data().amount;
+            });
+
+            const topProducts = Object.keys(itemCounts)
+                .map(k => ({ name: k, ...itemCounts[k] }))
+                .sort((a, b) => b.qty - a.qty)
+                .slice(0, 5);
+
+            const staffPerformances = Object.keys(waiterTotals)
+                .map(k => ({ name: k, ...waiterTotals[k] }))
+                .sort((a, b) => b.collected - a.collected);
+
+            const netKasa = totalIncome - totalExp;
+            const avgTicket = tableCount > 0 ? (totalIncome / tableCount) : 0;
+
+            const reportData = {
+                date: targetDateStr,
+                compiledAt: new Date().toISOString(),
+                totalIncome,
+                totalExp,
+                netKasa,
+                totalDiscount,
+                tableCount,
+                avgTicket,
+                topProducts,
+                staffPerformances,
+                payMethods
+            };
+
+            await setDoc(reportRef, reportData);
+            renderDashboard(reportData, targetDateStr);
+        }
+    } catch (error) {
+        console.error(error);
+        content.innerHTML = '<div class="dash-msg" style="color:var(--red); border-color:var(--red);">Veriler yüklenirken bir hata oluştu!</div>';
+    }
+}
+
+function renderDashboard(data, dateStr) {
+    const content = document.getElementById('dashboard-content');
+    
+    let productsHtml = '';
+    if (data.topProducts.length > 0) {
+        const maxQty = data.topProducts[0].qty;
+        data.topProducts.forEach(p => {
+            const pct = (p.qty / maxQty) * 100;
+            productsHtml += `
+                <div class="dash-bar-wrap">
+                    <div class="dash-bar-info"><span>${p.name} (${p.qty} Adet)</span> <span style="color:var(--accent);">${p.rev.toFixed(2)} ₺</span></div>
+                    <div class="dash-bar-bg"><div class="dash-bar-fill" style="width: ${pct}%"></div></div>
+                </div>
+            `;
+        });
+    } else {
+        productsHtml = '<div style="font-size:11px; color:var(--gray);">Bu güne ait satış bulunamadı.</div>';
+    }
+
+    let staffHtml = '';
+    if (data.staffPerformances.length > 0) {
+        data.staffPerformances.forEach((s, idx) => {
+            const medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : ''));
+            staffHtml += `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px dashed var(--border);">
+                    <strong style="font-size:12px; color:var(--text);">${medal} ${s.name}</strong>
+                    <div style="text-align:right; font-size:10px;">
+                        <span style="color:var(--gray);">Tahsilat:</span> <b style="color:var(--accent);">${s.collected.toFixed(2)} ₺</b><br>
+                        <span style="color:var(--gray); font-size:9px;">İşlenen Ürün: ${s.itemsAdded} Adet</span>
+                    </div>
+                </div>
+            `;
+        });
+    } else {
+        staffHtml = '<div style="font-size:11px; color:var(--gray);">Personel kaydı yok.</div>';
+    }
+
+    content.innerHTML = `
+        <div class="dash-grid">
+            <div class="dash-card">
+                <h4>NET KASA (CİRO - MASRAF)</h4>
+                <div class="val" style="color:var(--green);">${data.netKasa.toFixed(2)} ₺</div>
+                <div style="font-size:11px; color:var(--gray); margin-top:8px; font-weight:800; letter-spacing:1px;">
+                    CİRO: <span style="color:var(--text);">${data.totalIncome.toFixed(2)} ₺</span> | MASRAF: <span style="color:var(--red);">${data.totalExp.toFixed(2)} ₺</span>
+                </div>
+            </div>
+            <div class="dash-card">
+                <h4>TOPLAM HİZMET & SEPET ORTALAMASI</h4>
+                <div class="val">${data.tableCount} <span style="font-size:12px; color:var(--gray);">MASA HİZMETİ</span></div>
+                <div style="font-size:11px; color:var(--gray); margin-top:8px; font-weight:800; letter-spacing:1px;">
+                    MASA BAŞI ORTALAMA HARCAMA: <span style="color:var(--accent);">${data.avgTicket.toFixed(2)} ₺</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="dash-grid">
+            <div class="dash-card">
+                <h4 style="color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:15px;">YILDIZ ÜRÜNLER (İLK 5)</h4>
+                <div>${productsHtml}</div>
+            </div>
+            <div class="dash-card">
+                <h4 style="color:var(--blue); border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:15px;">PERSONEL LİDERLİK TABLOSU</h4>
+                <div>${staffHtml}</div>
+            </div>
+        </div>
+
+        <div class="dash-grid">
+            <div class="dash-card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+                <div>
+                    <h4>TAHSİLAT TİPLERİ</h4>
+                    <div style="font-size:12px; font-weight:800; color:var(--gray); line-height:1.6;">
+                        NAKİT: <b style="color:var(--text);">${data.payMethods['Nakit'].toFixed(2)} ₺</b><br>
+                        K.KARTI: <b style="color:var(--text);">${data.payMethods['Kredi Kartı'].toFixed(2)} ₺</b><br>
+                        Y.KARTI: <b style="color:var(--text);">${data.payMethods['Yemek Kartı'].toFixed(2)} ₺</b>
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <h4 style="color:var(--red);">TOPLAM UYGULANAN İSKONTO/İKRAM</h4>
+                    <div class="val" style="color:var(--red);">- ${data.totalDiscount.toFixed(2)} ₺</div>
+                </div>
+            </div>
+        </div>
+        <div style="text-align:right; font-size:9px; color:var(--gray); font-weight:bold; margin-top:10px; letter-spacing:1px;">
+            SON DERLENME ZAMANI: ${new Date(data.compiledAt).toLocaleString('tr-TR')}
+        </div>
+    `;
 }
 
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -1155,8 +1459,8 @@ document.getElementById('partial-pay-btn').addEventListener('click', () => {
     showModal('KISMİ ÖDEME', 'ALINACAK TUTARI VE YÖNTEMİ SEÇİNİZ:', `
         <input type="number" id="pay-amt" placeholder="Tutar (₺)">
         <select id="pay-method">
-            <option value="Nakit">Nakit</option>
             <option value="Kredi Kartı">Kredi Kartı</option>
+            <option value="Nakit">Nakit</option>
             <option value="Yemek Kartı">Yemek Kartı</option>
         </select>
     `, (data) => {
@@ -1214,8 +1518,8 @@ document.getElementById('item-pay-btn').addEventListener('click', () => {
     checklistHtml += `
         <div style="font-size:13px; font-weight:900; margin-bottom:10px;">SEÇİLEN TOPLAM: <span id="item-pay-total" style="color:var(--accent); font-size:18px;">0</span> ₺</div>
         <select id="item-pay-method">
-            <option value="Nakit">Nakit</option>
             <option value="Kredi Kartı">Kredi Kartı</option>
+            <option value="Nakit">Nakit</option>
             <option value="Yemek Kartı">Yemek Kartı</option>
         </select>
     `;
@@ -1285,19 +1589,37 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
     const remaining = (d.total || 0) - (d.paid || 0);
 
     if(remaining > 0) {
-        showModal('MASAYI KAPAT', `KALAN HESAP: <b style="color:var(--accent); font-size:18px;">${remaining} ₺</b><br><br>TAHSİLAT YÖNTEMİNİ SEÇİNİZ:`, `
-            <select id="pay-method-full">
-                <option value="Nakit">Nakit</option>
+        showModal('MASAYI KAPAT', `KALAN HESAP: <b style="color:var(--accent); font-size:18px;" id="modal-rem-total">${remaining} ₺</b><br><br>TAHSİLAT BİLGİLERİ:`, `
+            <div style="margin-bottom: 15px; text-align: left;">
+                <label style="font-size:11px; font-weight:900; color:var(--text); letter-spacing:1px;">İSKONTO YÜZDESİ (%):</label>
+                <input type="number" id="discount-percent" placeholder="Örn: 10 (İndirim yoksa boş bırakın)" min="0" max="100" style="margin-top: 6px; padding: 12px; font-size:14px;">
+            </div>
+            <select id="pay-method-full" style="padding: 12px; font-size:14px;">
                 <option value="Kredi Kartı">Kredi Kartı</option>
+                <option value="Nakit">Nakit</option>
                 <option value="Yemek Kartı">Yemek Kartı</option>
             </select>
         `, (data) => {
             const method = data['pay-method-full'];
+            const discPercent = parseFloat(data['discount-percent']) || 0;
+            
+            let discountAmount = 0;
+            let finalRemaining = remaining;
             const pays = d.partialPayments || [];
             const logs = d.logs || [];
 
-            pays.push({ amount: remaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
-            logs.push(createLog("HESAP KAPATILDI", `Kalan ${remaining} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
+            if(discPercent > 0) {
+                discountAmount = (remaining * discPercent) / 100;
+                finalRemaining = remaining - discountAmount;
+                logs.push(createLog("İSKONTO UYGULANDI", `%${discPercent} oranında (${discountAmount.toFixed(2)} ₺) indirim yapıldı.`));
+            }
+
+            if(finalRemaining > 0) {
+                pays.push({ amount: finalRemaining, method: method, time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}), user: currentUser.name, note: "Kapanış" });
+                logs.push(createLog("HESAP KAPATILDI", `Kalan ${finalRemaining.toFixed(2)} ₺ ${method} ile tahsil edilerek masa kapatıldı.`));
+            } else {
+                logs.push(createLog("HESAP KAPATILDI", `Tutarın tamamı (%100) iskonto edildiği için tahsilat alınmadı.`));
+            }
             
             currentOrderDocId = null;
             currentOrderData = null;
@@ -1312,10 +1634,33 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
             showModal('BAŞARILI', 'Hesap tahsil edildi ve masa kapatıldı.', '', null, true);
 
             const batch = writeBatch(db);
-            batch.update(doc(db, "orders", oId), { partialPayments: pays, paid: d.total, logs: logs, status: 'closed', closedAt: new Date().toISOString() });
+            batch.update(doc(db, "orders", oId), { 
+                partialPayments: pays, 
+                paid: d.paid + finalRemaining, 
+                discountPercent: discPercent,
+                discountAmount: discountAmount,
+                logs: logs, 
+                status: 'closed', 
+                closedAt: new Date().toISOString() 
+            });
             batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
             batch.commit().catch(()=>{});
         });
+
+        setTimeout(() => {
+            const discInput = document.getElementById('discount-percent');
+            const remTotal = document.getElementById('modal-rem-total');
+            if(discInput && remTotal) {
+                discInput.addEventListener('input', (e) => {
+                    let val = parseFloat(e.target.value) || 0;
+                    if(val < 0) val = 0;
+                    if(val > 100) val = 100;
+                    const newTotal = remaining - ((remaining * val) / 100);
+                    remTotal.textContent = `${newTotal.toFixed(2)} ₺`;
+                });
+            }
+        }, 100);
+
     } else {
         showModal('MASAYI KAPAT', 'AÇIK HESAP BULUNMUYOR. MASA BOŞALTILACAKTIR. ONAYLIYOR MUSUNUZ?', '', () => {
             const logs = d.logs || [];
@@ -1566,8 +1911,7 @@ function renderFinanceTotals() {
     let tNak = 0; let tKK = 0; let tYK = 0;
 
     globalOrders.forEach(o => {
-        const closedDateArr = new Date(o.closedAt).toLocaleDateString('tr-TR').split('.');
-        const formatClosed = `${closedDateArr[0].padStart(2, '0')}.${closedDateArr[1].padStart(2, '0')}.${closedDateArr[2]}`;
+        const formatClosed = getBusinessDateStr(o.createdAt || o.closedAt);
         
         if(formatClosed === targetDateStr) {
             todayIncome += o.total;
@@ -1580,8 +1924,7 @@ function renderFinanceTotals() {
     });
 
     globalExpenses.forEach(e => {
-        const expDateArr = new Date(e.time).toLocaleDateString('tr-TR').split('.');
-        const formatExp = `${expDateArr[0].padStart(2, '0')}.${expDateArr[1].padStart(2, '0')}.${expDateArr[2]}`;
+        const formatExp = getBusinessDateStr(e.time);
         
         if(formatExp === targetDateStr) {
             todayExpense += e.amount;
@@ -1616,8 +1959,7 @@ function renderFinanceHistoryList() {
     expenseContainer.innerHTML = '';
 
     globalExpenses.forEach(e => {
-        const expDateArr = new Date(e.time).toLocaleDateString('tr-TR').split('.');
-        const formatExp = `${expDateArr[0].padStart(2, '0')}.${expDateArr[1].padStart(2, '0')}.${expDateArr[2]}`;
+        const formatExp = getBusinessDateStr(e.time);
 
         if(formatExp === targetDateStr) {
             expenseContainer.innerHTML += `
@@ -1633,8 +1975,7 @@ function renderFinanceHistoryList() {
     if(expenseContainer.innerHTML === '') expenseContainer.innerHTML = '<p style="color:var(--gray); font-size:11px;">Kayıt yok.</p>';
 
     const filteredOrders = globalOrders.filter(o => {
-        const closedDateArr = new Date(o.closedAt).toLocaleDateString('tr-TR').split('.');
-        const formatClosed = `${closedDateArr[0].padStart(2, '0')}.${closedDateArr[1].padStart(2, '0')}.${closedDateArr[2]}`;
+        const formatClosed = getBusinessDateStr(o.createdAt || o.closedAt);
         return formatClosed === targetDateStr;
     });
     
@@ -1663,11 +2004,18 @@ function renderFinanceHistoryList() {
         
         logHtml += `<button class="btn-accent" type="button" style="margin-top:10px; padding:6px 12px; font-size:10px;" onclick="event.stopPropagation(); printSpecificOrder('${o.id}')">🖨️ BU ADİSYONU YAZDIR</button>`;
 
+        const isDiscounted = o.discountAmount > 0;
+        const discountText = isDiscounted ? `<span style="font-size:10px; color:var(--red); font-weight:900; margin-right:8px; border:1px solid var(--red); padding:2px 6px; border-radius:4px;">%${o.discountPercent} İSKONTO</span>` : '';
+        const finalTot = o.total - (o.discountAmount || 0);
+
         historyContainer.innerHTML += `
             <div class="history-item">
                 <div class="history-header" onclick="this.parentElement.classList.toggle('open')">
                     <span>${o.tableId} | SAAT: ${new Date(o.closedAt).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
-                    <span style="color:var(--accent); font-weight:900; font-size:14px; font-family:var(--font-head);">${o.total} ₺</span>
+                    <div style="display:flex; align-items:center;">
+                        ${discountText}
+                        <span style="color:var(--accent); font-weight:900; font-size:14px; font-family:var(--font-head);">${finalTot.toFixed(2)} ₺</span>
+                    </div>
                 </div>
                 <div class="history-body">${logHtml || 'Kayıt yok.'}</div>
             </div>
@@ -1680,18 +2028,19 @@ function renderFinanceHistoryList() {
 }
 
 document.getElementById('z-report-btn').addEventListener('click', () => {
-    const filterInput = document.getElementById('history-date-filter').value || toYYYYMMDD(new Date());
+    const filterInput = document.getElementById('history-date-filter').value || toYYYYMMDD(getBusinessDateObj(new Date()));
     const [y, m, d] = filterInput.split('-');
     const reportDisplayDate = `${d}.${m}.${y}`;
 
     let totalNakit = 0; let totalKK = 0; let totalYK = 0;
-    let userTotals = {}; let dailyExpenses = 0;
+    let userTotals = {}; let dailyExpenses = 0; let totalDiscount = 0;
 
     globalOrders.forEach(o => {
-        const closedDateArr = new Date(o.closedAt).toLocaleDateString('tr-TR').split('.');
-        const formatClosed = `${closedDateArr[0].padStart(2, '0')}.${closedDateArr[1].padStart(2, '0')}.${closedDateArr[2]}`;
+        const formatClosed = getBusinessDateStr(o.createdAt || o.closedAt);
 
         if(formatClosed === reportDisplayDate) {
+            if(o.discountAmount) totalDiscount += o.discountAmount;
+
             (o.partialPayments || []).forEach(p => {
                 const amt = p.amount; const user = p.user;
                 if(p.method === 'Nakit') totalNakit += amt;
@@ -1706,9 +2055,7 @@ document.getElementById('z-report-btn').addEventListener('click', () => {
     });
 
     globalExpenses.forEach(e => {
-        const expDateArr = new Date(e.time).toLocaleDateString('tr-TR').split('.');
-        const formatExp = `${expDateArr[0].padStart(2, '0')}.${expDateArr[1].padStart(2, '0')}.${expDateArr[2]}`;
-
+        const formatExp = getBusinessDateStr(e.time);
         if(formatExp === reportDisplayDate) {
             dailyExpenses += e.amount;
         }
@@ -1724,14 +2071,15 @@ document.getElementById('z-report-btn').addEventListener('click', () => {
             <p style="text-align: center; font-size:11px;">Rapor Tarihi: ${reportDisplayDate}</p>
             
             <div class="print-div"></div>
-            <div class="print-flex print-bold"><span>NAKİT:</span><span>${totalNakit} TL</span></div>
-            <div class="print-flex print-bold"><span>KREDİ KARTI:</span><span>${totalKK} TL</span></div>
-            <div class="print-flex print-bold"><span>YEMEK KARTI:</span><span>${totalYK} TL</span></div>
+            <div class="print-flex print-bold"><span>NAKİT:</span><span>${totalNakit.toFixed(2)} TL</span></div>
+            <div class="print-flex print-bold"><span>KREDİ KARTI:</span><span>${totalKK.toFixed(2)} TL</span></div>
+            <div class="print-flex print-bold"><span>YEMEK KARTI:</span><span>${totalYK.toFixed(2)} TL</span></div>
             <div class="print-div"></div>
-            <div class="print-flex print-bold" style="font-size:14px;"><span>GÜNLÜK CİRO:</span><span>${ciro} TL</span></div>
-            <div class="print-flex print-bold"><span>GÜNLÜK MASRAF:</span><span>- ${dailyExpenses} TL</span></div>
+            <div class="print-flex print-bold" style="font-size:14px;"><span>GÜNLÜK CİRO:</span><span>${ciro.toFixed(2)} TL</span></div>
+            <div class="print-flex print-bold" style="color:var(--gray);"><span>UYGULANAN İSKONTO:</span><span>- ${totalDiscount.toFixed(2)} TL</span></div>
+            <div class="print-flex print-bold"><span>GÜNLÜK MASRAF:</span><span>- ${dailyExpenses.toFixed(2)} TL</span></div>
             <div class="print-div"></div>
-            <div class="print-flex print-bold" style="font-size:16px;"><span>NET KASA:</span><span>${net} TL</span></div>
+            <div class="print-flex print-bold" style="font-size:16px;"><span>NET KASA:</span><span>${net.toFixed(2)} TL</span></div>
             
             <h3 style="margin-top:20px; border-bottom:1px solid #000; padding-bottom:5px; font-family:serif;">PERSONEL BAZLI TAHSİLAT</h3>
     `;
@@ -1741,10 +2089,10 @@ document.getElementById('z-report-btn').addEventListener('click', () => {
         html += `
             <div style="margin-bottom: 10px;">
                 <b style="font-size:13px;">${u}</b>
-                <div class="print-flex"><span>Nakit:</span><span>${ut.Nakit} TL</span></div>
-                <div class="print-flex"><span>KK:</span><span>${ut['Kredi Kartı']} TL</span></div>
-                <div class="print-flex"><span>YK:</span><span>${ut['Yemek Kartı']} TL</span></div>
-                <div class="print-flex print-bold" style="border-top:1px dashed #ccc; padding-top:2px;"><span>Toplam:</span><span>${ut.Toplam} TL</span></div>
+                <div class="print-flex"><span>Nakit:</span><span>${ut.Nakit.toFixed(2)} TL</span></div>
+                <div class="print-flex"><span>KK:</span><span>${ut['Kredi Kartı'].toFixed(2)} TL</span></div>
+                <div class="print-flex"><span>YK:</span><span>${ut['Yemek Kartı'].toFixed(2)} TL</span></div>
+                <div class="print-flex print-bold" style="border-top:1px dashed #ccc; padding-top:2px;"><span>Toplam:</span><span>${ut.Toplam.toFixed(2)} TL</span></div>
             </div>
         `;
     });
@@ -1779,21 +2127,31 @@ window.printSpecificOrder = (orderId) => {
     });
 
     Object.values(groups).forEach(g => {
-        html += `<div class="print-flex"><span>${g.qty}x ${g.name}</span><span>${g.totalPrice} TL</span></div>`;
+        html += `<div class="print-flex"><span>${g.qty}x ${g.name}</span><span>${g.totalPrice.toFixed(2)} TL</span></div>`;
         if(g.note) html += `<div style="font-size:10px; margin-top:-3px; margin-bottom:3px;">Not: ${g.note}</div>`;
     });
 
     html += `<div class="print-div"></div>`;
     
     (o.partialPayments || []).forEach(p => {
-        html += `<div class="print-flex" style="font-size:10px;"><span>${p.method} ile:</span><span>${p.amount} TL</span></div>`;
+        html += `<div class="print-flex" style="font-size:10px;"><span>${p.method} ile:</span><span>${p.amount.toFixed(2)} TL</span></div>`;
     });
 
     html += `
             <div class="print-div"></div>
-            <div class="print-flex print-bold" style="font-size: 14px;"><span>TOPLAM:</span><span>${o.total} TL</span></div>
-            <div class="print-flex"><span>ÖDENEN:</span><span>${o.paid || 0} TL</span></div>
-            <div class="print-flex print-bold" style="font-size: 14px;"><span>KALAN:</span><span>${o.total - (o.paid || 0)} TL</span></div>
+            <div class="print-flex print-bold" style="font-size: 14px;"><span>ARA TOPLAM:</span><span>${o.total.toFixed(2)} TL</span></div>
+    `;
+
+    if(o.discountAmount > 0) {
+        html += `<div class="print-flex print-bold" style="font-size: 12px;"><span>İSKONTO (%${o.discountPercent}):</span><span>- ${o.discountAmount.toFixed(2)} TL</span></div>`;
+    }
+    
+    const finalTotal = o.total - (o.discountAmount || 0);
+
+    html += `
+            <div class="print-flex print-bold" style="font-size: 14px; margin-top: 5px;"><span>TOPLAM:</span><span>${finalTotal.toFixed(2)} TL</span></div>
+            <div class="print-flex"><span>ÖDENEN:</span><span>${(o.paid || 0).toFixed(2)} TL</span></div>
+            <div class="print-flex print-bold" style="font-size: 14px;"><span>KALAN:</span><span>${(finalTotal - (o.paid || 0)).toFixed(2)} TL</span></div>
             <p style="text-align: center; margin-top: 15px; border-top: 1px dashed black; padding-top: 5px;">Bizi Tercih Ettiğiniz İçin Teşekkürler.</p>
         </div>
     `;
