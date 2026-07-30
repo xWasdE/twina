@@ -158,7 +158,7 @@ function toYYYYMMDD(dateObj) {
     return `${y}-${m}-${d}`;
 }
 
-
+// İŞLETME GÜNÜ HESAPLAMA (Gece kapanışlarına özel)
 function getBusinessDateObj(dateInput) {
     const d = new Date(dateInput);
     if(companyInfo.close) {
@@ -188,11 +188,11 @@ function getBusinessDateStr(dateInput) {
     return `${day}.${m}.${y}`;
 }
 
-
+// HTML/CSS'e DOKUNMADAN DASHBOARD EKRANINI DİNAMİK ENJEKTE EDEN FONKSİYON
 function injectDashboardUI() {
     if(document.getElementById('dashboard-view')) return;
 
-
+    // CSS Gömme
     const style = document.createElement('style');
     style.innerHTML = `
         .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 20px; }
@@ -207,7 +207,7 @@ function injectDashboardUI() {
     `;
     document.head.appendChild(style);
 
-
+    // Ana Ekran Gömme
     const viewContainer = document.querySelector('.view-container');
     if(viewContainer) {
         const mainDash = document.createElement('main');
@@ -229,7 +229,7 @@ function injectDashboardUI() {
         });
     }
 
-
+    // Navigasyon Butonu Gömme
     const adminNav = document.getElementById('admin-nav');
     if(adminNav) {
         const dashBtn = document.createElement('button');
@@ -438,7 +438,7 @@ async function startApp() {
     document.getElementById('active-user-name').textContent = currentUser.name.toUpperCase();
 
     if (currentUser.role === 'admin') {
-        injectDashboardUI();
+        injectDashboardUI(); // YÖNETİCİ GİRERSE DASHBOARD OLUŞTURULUR
         document.getElementById('admin-nav').style.display = 'flex';
         document.getElementById('staff-nav').style.display = 'none';
     } else {
@@ -537,7 +537,7 @@ function switchView(viewName) {
     }
 }
 
-
+// DASHBOARD LAZY EVALUATION / OKUMA & YAZMA MANTIĞI
 async function loadDashboardData(isoDateStr) {
     const content = document.getElementById('dashboard-content');
     if(!content) return;
@@ -621,8 +621,7 @@ async function loadDashboardData(isoDateStr) {
 
             const topProducts = Object.keys(itemCounts)
                 .map(k => ({ name: k, ...itemCounts[k] }))
-                .sort((a, b) => b.qty - a.qty)
-                .slice(0, 5);
+                .sort((a, b) => b.qty - a.qty);
 
             const staffPerformances = Object.keys(waiterTotals)
                 .map(k => ({ name: k, ...waiterTotals[k] }))
@@ -675,11 +674,10 @@ function renderDashboard(data, dateStr) {
 
     let staffHtml = '';
     if (data.staffPerformances.length > 0) {
-        data.staffPerformances.forEach((s, idx) => {
-            const medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : ''));
+        data.staffPerformances.forEach((s) => {
             staffHtml += `
                 <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px dashed var(--border);">
-                    <strong style="font-size:12px; color:var(--text);">${medal} ${s.name}</strong>
+                    <strong style="font-size:12px; color:var(--text);">${s.name}</strong>
                     <div style="text-align:right; font-size:10px;">
                         <span style="color:var(--gray);">Tahsilat:</span> <b style="color:var(--accent);">${s.collected.toFixed(2)} ₺</b><br>
                         <span style="color:var(--gray); font-size:9px;">İşlenen Ürün: ${s.itemsAdded} Adet</span>
@@ -711,12 +709,12 @@ function renderDashboard(data, dateStr) {
 
         <div class="dash-grid">
             <div class="dash-card">
-                <h4 style="color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:15px;">YILDIZ ÜRÜNLER (İLK 5)</h4>
-                <div>${productsHtml}</div>
+                <h4 style="color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:15px;">TÜM ÜRÜNLER (GÜNLÜK SATIŞ)</h4>
+                <div style="max-height: 350px; overflow-y: auto; padding-right: 5px;">${productsHtml}</div>
             </div>
             <div class="dash-card">
                 <h4 style="color:var(--blue); border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:15px;">PERSONEL LİDERLİK TABLOSU</h4>
-                <div>${staffHtml}</div>
+                <div style="max-height: 350px; overflow-y: auto; padding-right: 5px;">${staffHtml}</div>
             </div>
         </div>
 
