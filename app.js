@@ -158,7 +158,7 @@ function toYYYYMMDD(dateObj) {
     return `${y}-${m}-${d}`;
 }
 
-// İŞLETME GÜNÜ HESAPLAMA (Gece kapanışlarına özel)
+
 function getBusinessDateObj(dateInput) {
     const d = new Date(dateInput);
     if(companyInfo.close) {
@@ -188,11 +188,11 @@ function getBusinessDateStr(dateInput) {
     return `${day}.${m}.${y}`;
 }
 
-// HTML/CSS'e DOKUNMADAN DASHBOARD EKRANINI DİNAMİK ENJEKTE EDEN FONKSİYON
+
 function injectDashboardUI() {
     if(document.getElementById('dashboard-view')) return;
 
-    // CSS Gömme
+
     const style = document.createElement('style');
     style.innerHTML = `
         .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 20px; }
@@ -207,7 +207,7 @@ function injectDashboardUI() {
     `;
     document.head.appendChild(style);
 
-    // Ana Ekran Gömme
+
     const viewContainer = document.querySelector('.view-container');
     if(viewContainer) {
         const mainDash = document.createElement('main');
@@ -229,7 +229,7 @@ function injectDashboardUI() {
         });
     }
 
-    // Navigasyon Butonu Gömme
+
     const adminNav = document.getElementById('admin-nav');
     if(adminNav) {
         const dashBtn = document.createElement('button');
@@ -438,7 +438,7 @@ async function startApp() {
     document.getElementById('active-user-name').textContent = currentUser.name.toUpperCase();
 
     if (currentUser.role === 'admin') {
-        injectDashboardUI(); // YÖNETİCİ GİRERSE DASHBOARD OLUŞTURULUR
+        injectDashboardUI();
         document.getElementById('admin-nav').style.display = 'flex';
         document.getElementById('staff-nav').style.display = 'none';
     } else {
@@ -537,7 +537,7 @@ function switchView(viewName) {
     }
 }
 
-// DASHBOARD LAZY EVALUATION / OKUMA & YAZMA MANTIĞI
+
 async function loadDashboardData(isoDateStr) {
     const content = document.getElementById('dashboard-content');
     if(!content) return;
