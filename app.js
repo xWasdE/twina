@@ -130,6 +130,8 @@ function clearAllListeners() {
     globalUnsubscribes.forEach(unsub => unsub());
     globalUnsubscribes = [];
     if(timeUpdaterInterval) clearInterval(timeUpdaterInterval);
+    if(financeUnsubOrders) { financeUnsubOrders(); financeUnsubOrders = null; }
+    if(financeUnsubExpenses) { financeUnsubExpenses(); financeUnsubExpenses = null; }
 }
 
 function formatDuration(isoString) {
@@ -158,7 +160,6 @@ function toYYYYMMDD(dateObj) {
     return `${y}-${m}-${d}`;
 }
 
-// İŞLETME GÜNÜ HESAPLAMA (Gece kapanışlarına özel)
 function getBusinessDateObj(dateInput) {
     const d = new Date(dateInput);
     if(companyInfo.close) {
@@ -188,11 +189,9 @@ function getBusinessDateStr(dateInput) {
     return `${day}.${m}.${y}`;
 }
 
-// HTML/CSS'e DOKUNMADAN DASHBOARD EKRANINI DİNAMİK ENJEKTE EDEN FONKSİYON
 function injectDashboardUI() {
     if(document.getElementById('dashboard-view')) return;
 
-    // CSS Gömme
     const style = document.createElement('style');
     style.innerHTML = `
         .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 20px; }
@@ -207,7 +206,6 @@ function injectDashboardUI() {
     `;
     document.head.appendChild(style);
 
-    // Ana Ekran Gömme
     const viewContainer = document.querySelector('.view-container');
     if(viewContainer) {
         const mainDash = document.createElement('main');
@@ -217,7 +215,10 @@ function injectDashboardUI() {
         mainDash.innerHTML = `
             <div class="flex-row" style="justify-content:space-between; align-items:center; margin-bottom:25px; flex-wrap:wrap; border-bottom:1px solid var(--border); padding-bottom:15px;">
                 <h3 style="font-family:var(--font-head); color:var(--text); margin:0; font-size:20px; letter-spacing:3px;">GÜNLÜK ÖZET <span style="color:var(--accent);">(DASHBOARD)</span></h3>
-                <input type="date" id="dashboard-date-filter" style="width:auto; padding:10px 15px; font-size:12px; border-radius:4px; font-weight:900; background:var(--card-bg); border-color:var(--accent); color:var(--text); cursor:pointer;">
+                <div class="flex-row">
+                    <input type="date" id="dashboard-date-filter" style="width:auto; padding:10px 15px; font-size:12px; border-radius:4px; font-weight:900; background:var(--card-bg); border-color:var(--accent); color:var(--text); cursor:pointer;">
+                    <button id="dashboard-refresh-btn" class="btn-blue" style="padding:11px 15px; font-size:12px; border-radius:4px;" title="Raporu Yeniden Hesapla ve Güncelle">🔄 YENİLE</button>
+                </div>
             </div>
             <div id="dashboard-content"></div>
         `;
@@ -227,9 +228,13 @@ function injectDashboardUI() {
         document.getElementById('dashboard-date-filter').addEventListener('change', (e) => {
             loadDashboardData(e.target.value);
         });
+        
+        document.getElementById('dashboard-refresh-btn').addEventListener('click', () => {
+            const currentDate = document.getElementById('dashboard-date-filter').value;
+            if(currentDate) loadDashboardData(currentDate, true);
+        });
     }
 
-    // Navigasyon Butonu Gömme
     const adminNav = document.getElementById('admin-nav');
     if(adminNav) {
         const dashBtn = document.createElement('button');
@@ -438,9 +443,14 @@ async function startApp() {
     document.getElementById('active-user-name').textContent = currentUser.name.toUpperCase();
 
     if (currentUser.role === 'admin') {
-        injectDashboardUI(); // YÖNETİCİ GİRERSE DASHBOARD OLUŞTURULUR
+        injectDashboardUI(); 
         document.getElementById('admin-nav').style.display = 'flex';
         document.getElementById('staff-nav').style.display = 'none';
+        
+        const dateInput = document.getElementById('history-date-filter');
+        if(dateInput) {
+            dateInput.value = toYYYYMMDD(getBusinessDateObj(new Date())); 
+        }
     } else {
         document.getElementById('admin-nav').style.display = 'none';
         document.getElementById('staff-nav').style.display = 'flex';
@@ -467,12 +477,6 @@ async function startApp() {
     
     if(currentUser.role === 'admin') { 
         listenStaff(); 
-        listenFinanceAndHistory();
-        
-        const dateInput = document.getElementById('history-date-filter');
-        if(dateInput) {
-            dateInput.value = toYYYYMMDD(getBusinessDateObj(new Date())); 
-        }
     }
 }
 
@@ -509,7 +513,7 @@ function switchView(viewName) {
         finance: document.getElementById('finance-view'),
         settings: document.getElementById('settings-view'),
         'staff-settings': document.getElementById('staff-settings-view'),
-        dashboard: document.getElementById('dashboard-view') // YENİ GÖRÜNÜM
+        dashboard: document.getElementById('dashboard-view') 
     };
 
     Object.values(viewElements).forEach(v => { if(v) v.style.display = 'none'; });
@@ -522,9 +526,9 @@ function switchView(viewName) {
 
     if(viewName === 'finance' && currentUser && currentUser.role === 'admin') {
         const dateInput = document.getElementById('history-date-filter');
-        if(dateInput && !financeUnsubOrders) { 
-            dateInput.value = toYYYYMMDD(getBusinessDateObj(new Date())); 
-            loadFinanceForDate(dateInput.value); 
+        if(dateInput && !financeUnsubOrders) {
+            if(!dateInput.value) dateInput.value = toYYYYMMDD(getBusinessDateObj(new Date()));
+            loadFinanceDataForDate(dateInput.value); 
         }
     }
 
@@ -537,8 +541,7 @@ function switchView(viewName) {
     }
 }
 
-// DASHBOARD LAZY EVALUATION / OKUMA & YAZMA MANTIĞI
-async function loadDashboardData(isoDateStr) {
+async function loadDashboardData(isoDateStr, forceRefresh = false) {
     const content = document.getElementById('dashboard-content');
     if(!content) return;
     content.innerHTML = '<div class="dash-msg">Veriler yükleniyor...</div>';
@@ -547,7 +550,7 @@ async function loadDashboardData(isoDateStr) {
     const targetDateStr = `${d}.${m}.${y}`;
     
     const todayStr = getBusinessDateStr(new Date());
-    if (targetDateStr === todayStr) {
+    if (targetDateStr === todayStr && !forceRefresh) {
         content.innerHTML = `
             <div class="dash-msg" style="border-color: var(--accent);">
                 <h3 style="color:var(--accent); margin-bottom:10px; font-family:var(--font-head); font-size:18px;">BUGÜNÜN VERİLERİ BEKLENİYOR</h3>
@@ -561,10 +564,10 @@ async function loadDashboardData(isoDateStr) {
     const reportRef = doc(db, "daily_reports", targetDateStr);
     try {
         const reportSnap = await getDoc(reportRef);
-        if (reportSnap.exists()) {
+        if (reportSnap.exists() && !forceRefresh) {
             renderDashboard(reportSnap.data(), targetDateStr);
         } else {
-            content.innerHTML = '<div class="dash-msg">Geçmiş veriler okunup analiz ediliyor, lütfen bekleyin... (Bu işlem bir güne özel tek seferliktir)</div>';
+            content.innerHTML = '<div class="dash-msg">Veriler okunup sıfırdan analiz ediliyor, lütfen bekleyin... (Bu işlem bir güne özel tek seferliktir)</div>';
             
             const closeParts = (companyInfo.close || "00:00").split(':');
             const cH = parseInt(closeParts[0], 10);
@@ -577,8 +580,7 @@ async function loadDashboardData(isoDateStr) {
             const startIso = startDate.toISOString();
             const endIso = endDate.toISOString();
 
-            // Index hatası almamak için status yerelde filtrelenir
-            const qOrders = query(collection(db, "orders"), where("closedAt", ">=", startIso), where("closedAt", "<", endIso));
+            const qOrders = query(collection(db, "orders"), where("createdAt", ">=", startIso), where("createdAt", "<", endIso));
             const orderSnaps = await getDocs(qOrders);
             
             const qExpenses = query(collection(db, "expenses"), where("time", ">=", startIso), where("time", "<", endIso));
@@ -594,14 +596,17 @@ async function loadDashboardData(isoDateStr) {
                 if(o.status !== 'closed') return;
                 
                 tableCount++;
-                totalIncome += (o.total - (o.discountAmount || 0));
-                totalDiscount += (o.discountAmount || 0);
+                
+                const appliedDiscount = parseFloat(o.discountAmount) || 0;
+                
+                totalIncome += (parseFloat(o.total) || 0) - appliedDiscount;
+                totalDiscount += appliedDiscount;
 
                 (o.items || []).forEach(item => {
                     if(!item.deleted) {
                         if(!itemCounts[item.name]) itemCounts[item.name] = { qty: 0, rev: 0 };
                         itemCounts[item.name].qty++;
-                        itemCounts[item.name].rev += item.price;
+                        itemCounts[item.name].rev += (parseFloat(item.price) || 0);
 
                         if(!waiterTotals[item.waiter]) waiterTotals[item.waiter] = { itemsAdded: 0, collected: 0 };
                         waiterTotals[item.waiter].itemsAdded++;
@@ -609,9 +614,9 @@ async function loadDashboardData(isoDateStr) {
                 });
 
                 (o.partialPayments || []).forEach(p => {
-                    if(payMethods[p.method] !== undefined) payMethods[p.method] += p.amount;
+                    if(payMethods[p.method] !== undefined) payMethods[p.method] += (parseFloat(p.amount) || 0);
                     if(!waiterTotals[p.user]) waiterTotals[p.user] = { itemsAdded: 0, collected: 0 };
-                    waiterTotals[p.user].collected += p.amount;
+                    waiterTotals[p.user].collected += (parseFloat(p.amount) || 0);
                 });
             });
 
@@ -709,7 +714,7 @@ function renderDashboard(data, dateStr) {
 
         <div class="dash-grid">
             <div class="dash-card">
-                <h4 style="color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:15px;">TÜM ÜRÜNLER (GÜNLÜK SATIŞ)</h4>
+                <h4 style="color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:15px;">TÜM ÜRÜNLER (ÇOK SATANDAN AZA)</h4>
                 <div style="max-height: 350px; overflow-y: auto; padding-right: 5px;">${productsHtml}</div>
             </div>
             <div class="dash-card">
@@ -730,7 +735,7 @@ function renderDashboard(data, dateStr) {
                 </div>
                 <div style="text-align:right;">
                     <h4 style="color:var(--red);">TOPLAM UYGULANAN İSKONTO/İKRAM</h4>
-                    <div class="val" style="color:var(--red);">- ${data.totalDiscount.toFixed(2)} ₺</div>
+                    <div class="val" style="color:var(--red);">- ${(Number(data.totalDiscount) || 0).toFixed(2)} ₺</div>
                 </div>
             </div>
         </div>
@@ -1876,25 +1881,42 @@ document.getElementById('clear-broadcast-btn').addEventListener('click', () => {
     });
 });
 
-function listenFinanceAndHistory() {
-    const unsub1 = onSnapshot(query(collection(db, "orders"), where("status", "==", "closed")), (snapshot) => {
-        globalOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+function loadFinanceDataForDate(isoDateStr) {
+    if(!isoDateStr) return;
+    if(financeUnsubOrders) { financeUnsubOrders(); financeUnsubOrders = null; }
+    if(financeUnsubExpenses) { financeUnsubExpenses(); financeUnsubExpenses = null; }
+
+    const [y, m, d] = isoDateStr.split('-');
+    const closeParts = (companyInfo.close || "00:00").split(':');
+    const cH = parseInt(closeParts[0], 10);
+    const cM = parseInt(closeParts[1], 10);
+
+    const startDate = new Date(parseInt(y), parseInt(m)-1, parseInt(d), cH, cM, 0);
+    const endDate = new Date(startDate.getTime());
+    endDate.setDate(endDate.getDate() + 1);
+
+    const startIso = startDate.toISOString();
+    const endIso = endDate.toISOString();
+
+    const qOrders = query(collection(db, "orders"), where("createdAt", ">=", startIso), where("createdAt", "<", endIso));
+    financeUnsubOrders = onSnapshot(qOrders, (snapshot) => {
+        globalOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(o => o.status === 'closed');
         renderFinanceTotals();
         renderFinanceHistoryList();
     });
-    globalUnsubscribes.push(unsub1);
+    globalUnsubscribes.push(() => { if(financeUnsubOrders) financeUnsubOrders(); });
 
-    const unsub2 = onSnapshot(collection(db, "expenses"), (snapshot) => {
+    const qExp = query(collection(db, "expenses"), where("time", ">=", startIso), where("time", "<", endIso));
+    financeUnsubExpenses = onSnapshot(qExp, (snapshot) => {
         globalExpenses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         renderFinanceTotals();
         renderFinanceHistoryList();
     });
-    globalUnsubscribes.push(unsub2);
+    globalUnsubscribes.push(() => { if(financeUnsubExpenses) financeUnsubExpenses(); });
 }
 
-document.getElementById('history-date-filter')?.addEventListener('change', () => {
-    renderFinanceTotals();
-    renderFinanceHistoryList();
+document.getElementById('history-date-filter')?.addEventListener('change', (e) => {
+    loadFinanceDataForDate(e.target.value);
 });
 
 function renderFinanceTotals() {
@@ -2157,7 +2179,7 @@ window.printSpecificOrder = (orderId) => {
     const pf = document.getElementById('print-frame');
     pf.innerHTML = html;
     window.print();
-};
+});
 
 document.getElementById('save-expense-btn').addEventListener('click', async () => {
     try {
@@ -2176,7 +2198,7 @@ window.deleteExpense = (id) => {
     });
 };
 
-function listenQRCategoriesAndProducts() {
+async function listenQRCategoriesAndProducts() {
     let globalCats = [];
     let globalProds = [];
 
@@ -2222,17 +2244,17 @@ function listenQRCategoriesAndProducts() {
         });
     };
 
-    const unsubC = onSnapshot(collection(db, "categories"), (snapshot) => {
-        globalCats = [...snapshot.docs].map(d => d.data());
+    try {
+        const catsSnap = await getDocs(collection(db, "categories"));
+        globalCats = [...catsSnap.docs].map(d => d.data());
         globalCats.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
-        if(typeof window.renderQR === 'function') window.renderQR();
-    });
-    globalUnsubscribes.push(unsubC);
 
-    const unsubP = onSnapshot(collection(db, "products"), (snapshot) => {
-        globalProds = [...snapshot.docs].map(d => d.data());
+        const prodsSnap = await getDocs(collection(db, "products"));
+        globalProds = [...prodsSnap.docs].map(d => d.data());
         globalProds.sort((a,b) => getOrderVal(a.order) - getOrderVal(b.order));
+
         if(typeof window.renderQR === 'function') window.renderQR();
-    });
-    globalUnsubscribes.push(unsubP);
+    } catch(e) {
+        console.error("QR Yükleme Hatası:", e);
+    }
 }
