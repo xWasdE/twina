@@ -2179,7 +2179,7 @@ window.printSpecificOrder = (orderId) => {
     const pf = document.getElementById('print-frame');
     pf.innerHTML = html;
     window.print();
-});
+};
 
 document.getElementById('save-expense-btn').addEventListener('click', async () => {
     try {
