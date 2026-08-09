@@ -189,6 +189,105 @@ function getBusinessDateStr(dateInput) {
     return `${day}.${m}.${y}`;
 }
 
+function getActiveItemNames(items) {
+    const names = new Set();
+    (items || []).forEach(item => {
+        if (!item.deleted && item.name) {
+            names.add(item.name.toLocaleLowerCase('tr-TR'));
+        }
+    });
+    return Array.from(names);
+}
+
+function injectTableSearchUI() {
+    if(document.getElementById('table-search-wrapper')) return;
+    const tablesView = document.getElementById('tables-view');
+    const legend = tablesView.querySelector('.table-legend');
+    if(!legend) return;
+
+    const searchContainer = document.createElement('div');
+    searchContainer.className = 'flex-row';
+    searchContainer.style.marginBottom = '15px';
+    searchContainer.style.justifyContent = 'space-between';
+    searchContainer.style.alignItems = 'center';
+    searchContainer.style.flexWrap = 'wrap';
+    searchContainer.style.gap = '15px';
+
+    const wrapper = document.createElement('div');
+    wrapper.id = 'table-search-wrapper';
+    wrapper.style.position = 'relative';
+    wrapper.style.display = 'flex';
+    wrapper.style.alignItems = 'center';
+    wrapper.style.flex = '1';
+    wrapper.style.minWidth = '200px';
+    wrapper.style.maxWidth = '400px';
+
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.id = 'table-search-input';
+    searchInput.placeholder = '🔍 Masa veya İçerik Ara (Örn: Masa 3, Köfte)...';
+    searchInput.style.width = '100%';
+    searchInput.style.padding = '12px 35px 12px 15px';
+    searchInput.style.borderRadius = '6px';
+    searchInput.style.border = '2px solid var(--accent)';
+    searchInput.style.background = 'var(--card-bg)';
+    searchInput.style.color = 'var(--text)';
+    searchInput.style.fontWeight = '800';
+    searchInput.style.outline = 'none';
+
+    const clearBtn = document.createElement('button');
+    clearBtn.innerHTML = '✖';
+    clearBtn.style.position = 'absolute';
+    clearBtn.style.right = '10px';
+    clearBtn.style.background = 'transparent';
+    clearBtn.style.border = 'none';
+    clearBtn.style.color = 'var(--gray)';
+    clearBtn.style.fontSize = '14px';
+    clearBtn.style.cursor = 'pointer';
+    clearBtn.style.display = 'none';
+    clearBtn.style.padding = '5px';
+
+    const performSearch = (term) => {
+        document.querySelectorAll('.table-card').forEach(card => {
+            const tId = card.querySelector('span').textContent;
+            const tData = tableDataStore[tId];
+            if(!term) {
+                card.style.display = 'flex';
+                return;
+            }
+            
+            const matchesTable = tId.toLocaleLowerCase('tr-TR').includes(term);
+            const matchesItem = (tData && tData.status === 'active' && tData.activeItemNames) 
+                ? tData.activeItemNames.some(name => name.includes(term)) 
+                : false;
+                
+            card.style.display = (matchesTable || matchesItem) ? 'flex' : 'none';
+        });
+    };
+
+    searchInput.addEventListener('input', (e) => {
+        const term = e.target.value.toLocaleLowerCase('tr-TR').trim();
+        clearBtn.style.display = term.length > 0 ? 'block' : 'none';
+        performSearch(term);
+    });
+
+    clearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        clearBtn.style.display = 'none';
+        performSearch('');
+    });
+
+    wrapper.appendChild(searchInput);
+    wrapper.appendChild(clearBtn);
+    searchContainer.appendChild(wrapper);
+    
+    const newLegend = legend.cloneNode(true);
+    newLegend.style.marginBottom = '0';
+    searchContainer.appendChild(newLegend);
+    
+    legend.replaceWith(searchContainer);
+}
+
 function injectDashboardUI() {
     if(document.getElementById('dashboard-view')) return;
 
@@ -465,12 +564,13 @@ async function startApp() {
         if (snap && snap.empty) {
             const batch = writeBatch(db);
             for (let i = 1; i <= 28; i++) {
-                batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '' });
+                batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', activeItemNames: [] });
             }
             await batch.commit();
         }
     } catch(e){}
 
+    injectTableSearchUI();
     switchView('tables');
     listenTables();
     listenCategories(); 
@@ -764,6 +864,17 @@ function listenTables() {
         container.innerHTML = '';
         sortedDocs.forEach(docSnap => {
             const data = docSnap.data();
+            
+            if (data.status === 'active' && data.currentOrderId && !Array.isArray(data.activeItemNames)) {
+                getDoc(doc(db, "orders", data.currentOrderId)).then(oSnap => {
+                    if(oSnap.exists()) {
+                        const oData = oSnap.data();
+                        const activeNames = getActiveItemNames(oData.items);
+                        updateDoc(doc(db, "tables", docSnap.id), { activeItemNames: activeNames }).catch(()=>{});
+                    }
+                }).catch(()=>{});
+            }
+
             tableDataStore[docSnap.id] = data;
             const div = document.createElement('div');
             
@@ -794,6 +905,20 @@ function listenTables() {
         });
         updateTableTimes();
         
+        const searchInput = document.getElementById('table-search-input');
+        if (searchInput && searchInput.value) {
+            const term = searchInput.value.toLocaleLowerCase('tr-TR').trim();
+            document.querySelectorAll('.table-card').forEach(card => {
+                const tId = card.querySelector('span').textContent;
+                const tData = tableDataStore[tId];
+                const matchesTable = tId.toLocaleLowerCase('tr-TR').includes(term);
+                const matchesItem = (tData && tData.status === 'active' && tData.activeItemNames) 
+                    ? tData.activeItemNames.some(name => name.includes(term)) 
+                    : false;
+                card.style.display = (matchesTable || matchesItem) ? 'flex' : 'none';
+            });
+        }
+        
         const tCountInput = document.getElementById('table-count-input');
         if(tCountInput && !tCountInput.dataset.modified) {
             tCountInput.value = sortedDocs.length;
@@ -821,7 +946,7 @@ document.getElementById('update-table-count-btn')?.addEventListener('click', asy
     if (targetCount > currentCount) {
         const batch = writeBatch(db);
         for(let i = currentCount + 1; i <= targetCount; i++) {
-            batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            batch.set(doc(db, "tables", `MASA ${i}`), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null, activeItemNames: [] });
         }
         await batch.commit();
         showModal('BAŞARILI', `Masa sayısı ${targetCount} olarak güncellendi.`, '', null, true);
@@ -895,9 +1020,9 @@ document.getElementById('transfer-table-btn').addEventListener('click', async ()
                     logs: [...(orderData.logs||[]), createLog("Masa Taşındı", `${currentTableId} -> ${targetId}`)] 
                 });
                 batch.update(doc(db, "tables", targetId), { 
-                    status: 'active', currentOrderId: currentOrderDocId, totalAmount: orderData.total, paidAmount: orderData.paid, timestamp: new Date().toISOString() 
+                    status: 'active', currentOrderId: currentOrderDocId, totalAmount: orderData.total, paidAmount: orderData.paid, timestamp: new Date().toISOString(), activeItemNames: getActiveItemNames(orderData.items)
                 });
-                batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
+                batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null, activeItemNames: [] });
                 
                 currentOrderDocId = null;
                 currentOrderData = null;
@@ -919,10 +1044,10 @@ document.getElementById('transfer-table-btn').addEventListener('click', async ()
                 batch.update(doc(db, "orders", targetData.currentOrderId), {
                     items: mergedItems, partialPayments: mergedPayments, total: mergedTotal, paid: mergedPaid, logs: mergedLogs
                 });
-                batch.update(doc(db, "tables", targetId), { totalAmount: mergedTotal, paidAmount: mergedPaid });
+                batch.update(doc(db, "tables", targetId), { totalAmount: mergedTotal, paidAmount: mergedPaid, activeItemNames: getActiveItemNames(mergedItems) });
                 
                 batch.update(doc(db, "orders", currentOrderDocId), { status: 'merged_deleted' });
-                batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null });
+                batch.update(doc(db, "tables", currentTableId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, timestamp: null, activeItemNames: [] });
 
                 currentOrderDocId = null;
                 currentOrderData = null;
@@ -979,7 +1104,7 @@ function handleTableClick(tableName, tableData) {
         };
         document.getElementById('mod-cancel-res').onclick = async () => {
             closeModal();
-            await updateDoc(doc(db, "tables", tableName), { status: 'empty', reservedName: '', reservedColor: null, timestamp: null });
+            await updateDoc(doc(db, "tables", tableName), { status: 'empty', reservedName: '', reservedColor: null, timestamp: null, activeItemNames: [] });
         };
     } else if (tableData.status === 'active') {
         openOrderView(tableName, tableData.currentOrderId);
@@ -1002,7 +1127,7 @@ function createNewOrder(tableName) {
 
     const batch = writeBatch(db);
     batch.set(orderRef, newOrderData);
-    batch.update(doc(db, "tables", tableName), { status: 'active', currentOrderId: orderId, reservedName: '', totalAmount: 0, paidAmount: 0, timestamp: ts });
+    batch.update(doc(db, "tables", tableName), { status: 'active', currentOrderId: orderId, reservedName: '', totalAmount: 0, paidAmount: 0, timestamp: ts, activeItemNames: [] });
     batch.commit().catch(()=>{});
 
     openOrderView(tableName, orderId);
@@ -1407,9 +1532,10 @@ window.addItemToOrder = function(product) {
 
     renderAdisyon(currentOrderData);
 
+    const activeNames = getActiveItemNames(items);
     const batch = writeBatch(db);
     batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: currentTotal });
-    batch.update(doc(db, "tables", currentTableId), { totalAmount: currentTotal });
+    batch.update(doc(db, "tables", currentTableId), { totalAmount: currentTotal, activeItemNames: activeNames });
     batch.commit().catch(()=>{});
 };
 
@@ -1433,9 +1559,10 @@ window.deleteOrderItem = function(index) {
         
         renderAdisyon(currentOrderData);
 
+        const activeNames = getActiveItemNames(items);
         const batch = writeBatch(db);
         batch.update(doc(db, "orders", currentOrderDocId), { items: items, logs: logs, total: currentTotal });
-        batch.update(doc(db, "tables", currentTableId), { totalAmount: currentTotal });
+        batch.update(doc(db, "tables", currentTableId), { totalAmount: currentTotal, activeItemNames: activeNames });
         batch.commit().catch(()=>{});
     }
 };
@@ -1646,7 +1773,7 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
                 status: 'closed', 
                 closedAt: new Date().toISOString() 
             });
-            batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null, activeItemNames: [] });
             batch.commit().catch(()=>{});
         });
 
@@ -1683,7 +1810,7 @@ document.getElementById('close-table-btn').addEventListener('click', () => {
 
             const batch = writeBatch(db);
             batch.update(doc(db, "orders", oId), { status: 'closed', logs: logs, closedAt: new Date().toISOString() });
-            batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null });
+            batch.update(doc(db, "tables", tId), { status: 'empty', currentOrderId: null, totalAmount: 0, paidAmount: 0, reservedName: '', reservedColor: null, timestamp: null, activeItemNames: [] });
             batch.commit().catch(()=>{});
         });
     }
