@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover">
+    <meta name="theme-color" content="#141210">
+    <title>Sayfa Bulunamadı - TWIN-A</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800;900&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script>
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+    </script>
+</head>
+<body>
+    <div class="screen active" style="justify-content:center; align-items:center; flex-direction:column; text-align:center; padding: 20px;">
+        <img src="logo.png" alt="TWIN-A" style="height:80px; margin-bottom:20px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.2));" onerror="this.style.display='none'">
+        <h1 style="font-size:100px; color:var(--accent); font-weight:900; font-family:var(--font-head); letter-spacing:8px; margin:0; line-height: 1;">404</h1>
+        <h3 style="margin-top:10px; margin-bottom:20px; font-weight:900; color:var(--text); font-size:18px; letter-spacing:3px; font-family:var(--font-head);">SAYFA BULUNAMADI</h3>
+        <p style="color:var(--gray); font-size:13px; max-width:400px; margin-bottom:35px; line-height:1.6; font-weight:600;">
+            Aradığınız sayfa silinmiş, ismi değiştirilmiş veya geçici olarak ulaşılamıyor olabilir. Lütfen geçerli bir adrese yöneldiğinizden emin olun.
+        </p>
+        <button onclick="window.location.href='/'" class="btn-accent" style="padding:15px 40px; font-size:13px; font-weight:900; letter-spacing:2px; box-shadow: 0 4px 15px rgba(212, 175, 55, 0.2);">SİSTEME GERİ DÖN</button>
+    </div>
+</body>
+</html>
